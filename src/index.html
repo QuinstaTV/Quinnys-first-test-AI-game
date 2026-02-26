@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Damaged Territory - Capture the Flag</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚩</text></svg>">
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <div id="loading">
+    <div class="loader-text">DAMAGED TERRITORY</div>
+    <div class="loader-sub">Loading...</div>
+  </div>
+
+  <!-- Socket.io client (CDN) - for multiplayer -->
+  <script src="https://cdn.socket.io/4.7.4/socket.io.min.js" 
+          crossorigin="anonymous"
+          onerror="console.log('Socket.io CDN unavailable - multiplayer will use fallback')">
+  </script>
+
+  <!-- Game scripts (loaded in dependency order) -->
+  <script src="js/utils.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/sprites.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/particles.js"></script>
+  <script src="js/projectiles.js"></script>
+  <script src="js/vehicles.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/network.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/game.js"></script>
+
+  <script>
+    // Hide loader once game initializes
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        const loader = document.getElementById('loading');
+        if (loader) loader.style.display = 'none';
+      }, 500);
+    });
+  </script>
+</body>
+</html>
