@@ -144,24 +144,16 @@
     // Cap DPR at 2 for performance on high-DPI devices
     dpr = Math.min(dpr, 2);
 
-    var cssW = window.innerWidth;
-    var cssH = window.innerHeight;
-
-    // Minimum logical size
-    screenW = Math.max(800, cssW);
-    screenH = Math.max(500, cssH);
-
-    // On small touch screens, use actual dimensions (no minimum)
-    if (Game.Input && Game.Input.isTouch && cssW < 800) {
-      screenW = cssW;
-      screenH = cssH;
-    }
+    // Always use actual viewport dimensions — no minimum that can exceed
+    // the viewport and cause right-shift / coordinate mismatch.
+    screenW = window.innerWidth;
+    screenH = window.innerHeight;
 
     // Set canvas backing resolution (crisp rendering)
     canvas.width = Math.round(screenW * dpr);
     canvas.height = Math.round(screenH * dpr);
 
-    // CSS display size
+    // CSS display size = viewport (never overflows)
     canvas.style.width = screenW + 'px';
     canvas.style.height = screenH + 'px';
 
@@ -238,8 +230,19 @@
     }
     Game.UI.selectedMenuItem = menuSelection;
 
+    // Keyboard confirm
     if (Game.Input.wasPressed('Enter') || Game.Input.wasPressed('Space')) {
       selectMenuItem(menuSelection);
+    }
+
+    // Mouse click / touch tap — detect which menu item was hit
+    if (Game.Input.wasClicked()) {
+      var tapped = Game.UI.getMenuClick();
+      if (tapped >= 0) {
+        Game.Audio.init();
+        Game.Audio.resume();
+        selectMenuItem(tapped);
+      }
     }
   }
 
@@ -322,8 +325,25 @@
       }
     }
 
+    // Keyboard confirm
     if (Game.Input.wasPressed('Enter') || Game.Input.wasPressed('Space')) {
       if (vehiclePool[selectedVehicle]) {
+        if (map) {
+          deployVehicle();
+        } else {
+          Game.UI.startElevatorDeploy(selectedVehicle, function () {
+            startGame();
+          });
+        }
+      }
+    }
+
+    // Touch tap / mouse click on a vehicle bay
+    if (Game.Input.wasClicked()) {
+      var veh = Game.UI.getVehicleClick();
+      if (veh >= 0 && vehiclePool[veh]) {
+        selectedVehicle = veh;
+        Game.Audio.play('click');
         if (map) {
           deployVehicle();
         } else {
@@ -1052,6 +1072,21 @@
     if (Game.Input.wasPressed('Escape')) {
       Game.Network.disconnect();
       state = STATE.MENU;
+    }
+
+    // Touch tap / mouse click on lobby buttons
+    if (Game.Input.wasClicked()) {
+      var action = Game.UI.getLobbyAction();
+      if (action === 'create') {
+        Game.Network.createRoom('Game ' + Math.floor(Math.random() * 1000));
+      } else if (action === 'refresh') {
+        Game.Network.requestRooms();
+      } else if (action && action.action === 'join') {
+        var rooms = Game.Network.lobby.rooms;
+        if (rooms[action.index]) {
+          Game.Network.joinRoom(rooms[action.index].id);
+        }
+      }
     }
   }
 

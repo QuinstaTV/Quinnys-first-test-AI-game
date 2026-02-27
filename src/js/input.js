@@ -135,6 +135,15 @@
     touchActive = true;
     var r = canvasRef.getBoundingClientRect();
 
+    // ---- Always register first touch as a tap/click (menus, overlays, etc.) ----
+    // ctx.setTransform(dpr,...) makes drawing coords = CSS pixels, so use CSS offset
+    var ft = e.changedTouches[0];
+    if (ft) {
+      mouseX = ft.clientX - r.left;
+      mouseY = ft.clientY - r.top;
+      mouseClicked = true;
+    }
+
     for (var i = 0; i < e.changedTouches.length; i++) {
       var t = e.changedTouches[i];
       var tx = t.clientX - r.left;

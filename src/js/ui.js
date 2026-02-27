@@ -442,73 +442,240 @@
     ctx.textAlign = 'center';
     ctx.fillText('HOW TO PLAY', screenW / 2, 50);
 
-    var lines;
     if (Game.Input.isTouch) {
-      lines = [
-        '',
-        '╔══════════════════════════════════════════╗',
-        '║  OBJECTIVE: Capture the enemy flag and   ║',
-        '║  return it to your base. First to 3 wins!║',
-        '╠══════════════════════════════════════════╣',
-        '║                                          ║',
-        '║  TOUCH CONTROLS:                         ║',
-        '║  Left joystick ....... Move vehicle      ║',
-        '║  Right joystick ...... Aim & fire        ║',
-        '║  FIRE button ......... Shoot             ║',
-        '║  AUTO button ......... Toggle auto-fire  ║',
-        '║  MINE/SWAP button .... Special action    ║',
-        '║  ⏸ button ............ Pause menu        ║',
-        '║                                          ║',
-        '║  TIPS:                                   ║',
-        '║  • Only JEEP can carry the flag!         ║',
-        '║  • Vehicles have limited fuel & ammo     ║',
-        '║  • Return to base or depots to resupply  ║',
-        '║  • Destroy walls to create new paths     ║',
-        '║  • UrbanStrike flies over everything     ║',
-        '║  • Tap a vehicle bay to deploy           ║',
-        '║  • Play in landscape mode!               ║',
-        '║                                          ║',
-        '╚══════════════════════════════════════════╝',
-        '',
-        'Tap anywhere to return to menu'
-      ];
+      renderHowToPlayTouch();
     } else {
-      lines = [
-        '',
-        '╔══════════════════════════════════════════╗',
-        '║  OBJECTIVE: Capture the enemy flag and   ║',
-        '║  return it to your base. First to 3 wins!║',
-        '╠══════════════════════════════════════════╣',
-        '║                                          ║',
-        '║  CONTROLS:                               ║',
-        '║  WASD / Arrow Keys ... Move vehicle      ║',
-        '║  Mouse / Space ....... Shoot             ║',
-        '║  E ........... Lay mine (StrikeMaster)   ║',
-        '║  R ................... Swap vehicle       ║',
-        '║  M ................... Toggle music       ║',
-        '║  ESC ................. Pause / Menu       ║',
-        '║                                          ║',
-        '║  TIPS:                                   ║',
-        '║  • Only JEEP can carry the flag!         ║',
-        '║  • Vehicles have limited fuel & ammo     ║',
-        '║  • Return to base or depots to resupply  ║',
-        '║  • Destroy walls to create new paths     ║',
-        '║  • UrbanStrike flies over everything     ║',
-        '║  • StrikeMaster can lay mines behind it  ║',
-        '║  • BushMaster turret auto-aims enemies   ║',
-        '║  • Jeep has 3 respawn lives per round    ║',
-        '║                                          ║',
-        '╚══════════════════════════════════════════╝',
-        '',
-        'Press any key to return to menu'
-      ];
+      renderHowToPlayDesktop();
     }
+  }
+
+  function renderHowToPlayTouch() {
+    var cx = screenW / 2;
+    var topY = 70;
+
+    // --- Objective banner ---
+    ctx.fillStyle = '#ffcc00';
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Capture the enemy flag & return it to your base!', cx, topY);
+    ctx.fillStyle = '#aaa';
+    ctx.font = '12px monospace';
+    ctx.fillText('First to 3 captures wins the round.', cx, topY + 18);
+
+    // --- Diagram area ---
+    var diagY = topY + 50;
+    var diagH = Math.min(200, screenH * 0.32);
+    var diagW = Math.min(screenW - 40, 420);
+    var diagX = cx - diagW / 2;
+
+    // Diagram background (simulated phone screen)
+    ctx.fillStyle = 'rgba(40,40,40,0.8)';
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, diagX, diagY, diagW, diagH, 10);
+    ctx.fill();
+    ctx.stroke();
+
+    // --- Left joystick ---
+    var jR = Math.min(36, diagH * 0.17);
+    var ljX = diagX + diagW * 0.18;
+    var ljY = diagY + diagH * 0.55;
+
+    // Outer ring
+    ctx.beginPath();
+    ctx.arc(ljX, ljY, jR, 0, Math.PI * 2);
+    ctx.strokeStyle = '#66aaff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Thumb dot
+    ctx.beginPath();
+    ctx.arc(ljX + jR * 0.25, ljY - jR * 0.2, jR * 0.35, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(102,170,255,0.5)';
+    ctx.fill();
+    // Arrows
+    drawArrowMini(ctx, ljX, ljY - jR + 4, 0, '#66aaff');   // up
+    drawArrowMini(ctx, ljX, ljY + jR - 4, Math.PI, '#66aaff'); // down
+    drawArrowMini(ctx, ljX - jR + 4, ljY, Math.PI * 1.5, '#66aaff'); // left
+    drawArrowMini(ctx, ljX + jR - 4, ljY, Math.PI * 0.5, '#66aaff'); // right
+    // Label
+    ctx.fillStyle = '#66aaff';
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('MOVE', ljX, ljY + jR + 16);
+
+    // --- Right joystick ---
+    var rjX = diagX + diagW * 0.82;
+    var rjY = diagY + diagH * 0.55;
+
+    ctx.beginPath();
+    ctx.arc(rjX, rjY, jR, 0, Math.PI * 2);
+    ctx.strokeStyle = '#ff5555';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Crosshair
+    ctx.beginPath();
+    ctx.moveTo(rjX - jR * 0.5, rjY); ctx.lineTo(rjX + jR * 0.5, rjY);
+    ctx.moveTo(rjX, rjY - jR * 0.5); ctx.lineTo(rjX, rjY + jR * 0.5);
+    ctx.strokeStyle = 'rgba(255,85,85,0.6)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = '#ff5555';
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('AIM', rjX, rjY + jR + 16);
+
+    // --- Buttons (bottom middle-right area) ---
+    var btnW = 30, btnH = 18, btnGap = 6;
+    var btnX = diagX + diagW * 0.55;
+    var btnY = diagY + diagH * 0.7;
+
+    // Fire button
+    ctx.fillStyle = 'rgba(255,0,0,0.4)';
+    roundRect(ctx, btnX, btnY, btnW, btnH, 4);
+    ctx.fill();
+    ctx.strokeStyle = '#ff4444';
+    ctx.lineWidth = 1;
+    roundRect(ctx, btnX, btnY, btnW, btnH, 4);
+    ctx.stroke();
+    ctx.fillStyle = '#ff4444';
+    ctx.font = 'bold 8px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('FIRE', btnX + btnW / 2, btnY + 13);
+
+    // Auto button
+    var autoX = btnX + btnW + btnGap;
+    ctx.fillStyle = 'rgba(0,180,0,0.3)';
+    roundRect(ctx, autoX, btnY, btnW, btnH, 4);
+    ctx.fill();
+    ctx.strokeStyle = '#44cc44';
+    ctx.lineWidth = 1;
+    roundRect(ctx, autoX, btnY, btnW, btnH, 4);
+    ctx.stroke();
+    ctx.fillStyle = '#44cc44';
+    ctx.font = 'bold 8px monospace';
+    ctx.fillText('AUTO', autoX + btnW / 2, btnY + 13);
+
+    // Special button
+    var specX = autoX + btnW + btnGap;
+    ctx.fillStyle = 'rgba(255,170,0,0.3)';
+    roundRect(ctx, specX, btnY, btnW, btnH, 4);
+    ctx.fill();
+    ctx.strokeStyle = '#ffaa00';
+    ctx.lineWidth = 1;
+    roundRect(ctx, specX, btnY, btnW, btnH, 4);
+    ctx.stroke();
+    ctx.fillStyle = '#ffaa00';
+    ctx.font = 'bold 7px monospace';
+    ctx.fillText('SPEC', specX + btnW / 2, btnY + 13);
+
+    // Pause icon (top center of diagram)
+    var pauseX = diagX + diagW * 0.5;
+    var pauseY = diagY + 16;
+    ctx.fillStyle = '#aaa';
+    ctx.fillRect(pauseX - 5, pauseY - 5, 3, 10);
+    ctx.fillRect(pauseX + 2, pauseY - 5, 3, 10);
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('PAUSE', pauseX, pauseY + 18);
+
+    // --- Tips list ---
+    var tipY = diagY + diagH + 28;
+    var tips = [
+      { icon: '🏁', text: 'Only JEEP can carry the flag!' },
+      { icon: '⛽', text: 'Vehicles have limited fuel & ammo' },
+      { icon: '🔧', text: 'Return to base or depots to resupply' },
+      { icon: '💥', text: 'Destroy walls to create shortcuts' },
+      { icon: '🚁', text: 'UrbanStrike flies over everything' },
+      { icon: '📱', text: 'Play in landscape for best experience' }
+    ];
+
+    ctx.textAlign = 'center';
+    var tipSpacing = Math.min(20, (screenH - tipY - 40) / tips.length);
+    tips.forEach(function (tip, i) {
+      ctx.fillStyle = '#ffcc00';
+      ctx.font = '13px sans-serif';
+      ctx.fillText(tip.icon, cx - diagW * 0.38, tipY + i * tipSpacing + 1);
+      ctx.fillStyle = '#ccc';
+      ctx.font = '12px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(tip.text, cx - diagW * 0.32, tipY + i * tipSpacing);
+      ctx.textAlign = 'center';
+    });
+
+    // --- Footer ---
+    ctx.fillStyle = '#888';
+    ctx.font = '12px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Tap anywhere to return', cx, screenH - 18);
+  }
+
+  function renderHowToPlayDesktop() {
+    var lines = [
+      '',
+      '╔══════════════════════════════════════════╗',
+      '║  OBJECTIVE: Capture the enemy flag and   ║',
+      '║  return it to your base. First to 3 wins!║',
+      '╠══════════════════════════════════════════╣',
+      '║                                          ║',
+      '║  CONTROLS:                               ║',
+      '║  WASD / Arrow Keys ... Move vehicle      ║',
+      '║  Mouse / Space ....... Shoot             ║',
+      '║  E ........... Lay mine (StrikeMaster)   ║',
+      '║  R ................... Swap vehicle       ║',
+      '║  M ................... Toggle music       ║',
+      '║  ESC ................. Pause / Menu       ║',
+      '║                                          ║',
+      '║  TIPS:                                   ║',
+      '║  • Only JEEP can carry the flag!         ║',
+      '║  • Vehicles have limited fuel & ammo     ║',
+      '║  • Return to base or depots to resupply  ║',
+      '║  • Destroy walls to create new paths     ║',
+      '║  • UrbanStrike flies over everything     ║',
+      '║  • StrikeMaster can lay mines behind it  ║',
+      '║  • BushMaster turret auto-aims enemies   ║',
+      '║  • Jeep has 3 respawn lives per round    ║',
+      '║                                          ║',
+      '╚══════════════════════════════════════════╝',
+      '',
+      'Press any key to return to menu'
+    ];
 
     ctx.fillStyle = '#ccc';
     ctx.font = '13px monospace';
-    lines.forEach((line, i) => {
+    ctx.textAlign = 'center';
+    lines.forEach(function (line, i) {
       ctx.fillText(line, screenW / 2, 90 + i * 20);
     });
+  }
+
+  // Helper: draw a rounded rectangle path
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.lineTo(x + w - r, y);
+    c.arcTo(x + w, y, x + w, y + r, r);
+    c.lineTo(x + w, y + h - r);
+    c.arcTo(x + w, y + h, x + w - r, y + h, r);
+    c.lineTo(x + r, y + h);
+    c.arcTo(x, y + h, x, y + h - r, r);
+    c.lineTo(x, y + r);
+    c.arcTo(x, y, x + r, y, r);
+    c.closePath();
+  }
+
+  // Helper: draw a small directional arrow for joystick diagrams
+  function drawArrowMini(c, x, y, rot, color) {
+    c.save();
+    c.translate(x, y);
+    c.rotate(rot);
+    c.beginPath();
+    c.moveTo(0, -5);
+    c.lineTo(-3, 0);
+    c.lineTo(3, 0);
+    c.closePath();
+    c.fillStyle = color;
+    c.fill();
+    c.restore();
   }
 
   /* ========== HUD (In-Game) ========== */

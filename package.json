@@ -1,6 +1,6 @@
 {
   "name": "damaged-territory-ctf",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Top-down vehicular Capture the Flag shooter inspired by Return Fire / Damaged Territory",
   "main": "server.js",
   "scripts": {

@@ -1,5 +1,27 @@
 # CHANGELOG — Damaged Territory
 
+## v1.4.1 — Mobile & Layout Bug Fixes
+
+### Bug Fixes
+- **Mobile menu taps now work**: `onTouchStart` always sets `mouseX`/`mouseY`/`mouseClicked` from the first touch, so Canvas-drawn menus, vehicle select, and lobby buttons respond to taps. Previously `e.preventDefault()` blocked the browser's synthesized `click` event, leaving `handleClick` unreachable on touch devices.
+- **Desktop menu no longer right-shifted**: Removed `Math.max(800, ...)` minimum in `resizeCanvas()` — canvas now always matches the actual viewport width. Menus center correctly at all window sizes.
+- **How-to-Play: procedural mobile diagrams**: Touch devices now see Canvas-drawn joystick/button diagrams with labeled MOVE, AIM, FIRE, AUTO, SPEC zones instead of box-drawing-character text that overflowed small screens. Desktop version unchanged.
+
+### Touch → Game-Loop Click Propagation
+- `updateMenu()` now checks `wasClicked()` → `getMenuClick()` (was keyboard-only)
+- `updateVehicleSelect()` now checks `wasClicked()` → `getVehicleClick()`
+- `updateLobby()` now checks `wasClicked()` → `getLobbyAction()`
+- Audio unlock (`Game.Audio.init()/resume()`) triggers on first touch tap
+
+### Tests
+- 17 new regression tests in `tests/bugfix-v141.test.js` (85 total, 5 suites)
+  - Touch-to-click propagation (6 tests)
+  - Canvas resize source validation (3 tests)
+  - How-to-Play mobile/desktop split (5 tests)
+  - Game-loop click processing (3 tests)
+
+---
+
 ## v1.4.0 — Mobile Touch Optimization
 
 ### Hybrid Input System (input.js rewrite)
