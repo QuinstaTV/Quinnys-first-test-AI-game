@@ -1,19 +1,56 @@
 /* ============================================================
-   map.js - Procedural island map generator & tilemap system
-   Creates CTF maps with bases, depots, bridges, walls, trees
+   map.js - Seed-based procedural island map generator & tilemap
+   Creates unique CTF maps per round with escalation (R1-9 normal,
+   R10 "Epic" with multiple flag towers). Perlin-like noise for
+   natural terrain; path-connected bases guaranteed.
    ============================================================ */
 (function () {
   'use strict';
 
   const { TILE, T, randInt, randFloat, isSolid, isPassableGround } = Game;
 
-  const MAP_W = 80;
-  const MAP_H = 50;
+  /* ---- Seeded PRNG (Mulberry32) ---- */
+  function mulberry32(seed) {
+    let s = seed | 0;
+    return function () {
+      s = (s + 0x6D2B79F5) | 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  /* ---- Simple value noise (seeded) ---- */
+  function makeNoise(rng, gridW, gridH) {
+    const grid = [];
+    for (let y = 0; y < gridH; y++) {
+      grid[y] = [];
+      for (let x = 0; x < gridW; x++) grid[y][x] = rng();
+    }
+    return function (x, y) {
+      const gx = (x / gridW) * (gridW - 1);
+      const gy = (y / gridH) * (gridH - 1);
+      const ix = Math.floor(gx), iy = Math.floor(gy);
+      const fx = gx - ix, fy = gy - iy;
+      const ix1 = Math.min(ix + 1, gridW - 1);
+      const iy1 = Math.min(iy + 1, gridH - 1);
+      const a = grid[iy][ix], b = grid[iy][ix1];
+      const c = grid[iy1][ix], d = grid[iy1][ix1];
+      const top = a + (b - a) * fx;
+      const bot = c + (d - c) * fx;
+      return top + (bot - top) * fy;
+    };
+  }
+
+  const DEFAULT_W = 80;
+  const DEFAULT_H = 50;
+  const EPIC_W = 100;
+  const EPIC_H = 62;
 
   class GameMap {
     constructor() {
-      this.width = MAP_W;
-      this.height = MAP_H;
+      this.width = DEFAULT_W;
+      this.height = DEFAULT_H;
       this.tiles = [];
       this.team1Base = { x: 0, y: 0 };
       this.team2Base = { x: 0, y: 0 };
@@ -21,22 +58,41 @@
       this.team2Flag = { x: 0, y: 0 };
       this.depots = [];
       this.turrets = [];
-      this.worldW = MAP_W * TILE;
-      this.worldH = MAP_H * TILE;
+      this.seed = Date.now();
+      this.roundNum = 1;
+      this.worldW = this.width * TILE;
+      this.worldH = this.height * TILE;
     }
 
-    generate() {
+    /**
+     * Generate map from seed + round number.
+     * @param {number} [seed]     - deterministic seed (for MP sync)
+     * @param {number} [roundNum] - 1-10; round 10 is "Epic"
+     */
+    generate(seed, roundNum) {
+      this.seed = seed !== undefined ? seed : Date.now();
+      this.roundNum = roundNum || 1;
+      const isEpic = this.roundNum >= 10;
+      this.width  = isEpic ? EPIC_W : DEFAULT_W;
+      this.height = isEpic ? EPIC_H : DEFAULT_H;
+      this.worldW = this.width * TILE;
+      this.worldH = this.height * TILE;
+
+      const rng = mulberry32(this.seed);
       const W = this.width, H = this.height;
-      // Start with water
+
+      // Noise layers for terrain variance
+      const noise1 = makeNoise(rng, 12, 10);
+      const noise2 = makeNoise(rng, 20, 16);
+
+      // Water fill
       this.tiles = [];
       for (let y = 0; y < H; y++) {
         this.tiles[y] = [];
-        for (let x = 0; x < W; x++) {
-          this.tiles[y][x] = T.WATER;
-        }
+        for (let x = 0; x < W; x++) this.tiles[y][x] = T.WATER;
       }
 
-      // Create island shape using distance from center
+      // Island shape with noise
       const cx = W / 2, cy = H / 2;
       const rx = W * 0.44, ry = H * 0.42;
       for (let y = 0; y < H; y++) {
@@ -44,90 +100,110 @@
           const dx = (x - cx) / rx;
           const dy = (y - cy) / ry;
           const d = dx * dx + dy * dy;
-          // Noise-like variation
-          const noise = Math.sin(x * 0.5) * 0.08 + Math.cos(y * 0.7) * 0.06 +
-                        Math.sin((x + y) * 0.3) * 0.05;
-          if (d + noise < 0.85) {
+          const n = noise1(x / W, y / H) * 0.18 + noise2(x / W, y / H) * 0.1;
+          if (d + n - 0.05 < 0.85) {
             this.tiles[y][x] = T.GRASS;
-          } else if (d + noise < 1.0) {
+          } else if (d + n < 1.0) {
             this.tiles[y][x] = T.SAND;
           }
         }
       }
 
-      // Create water channels through the middle (strategic obstacles)
-      this.carveChannel(cx, cy - 8, cx, cy + 8, 2);
-      // Smaller ponds
-      this.carvePond(cx - 8, cy - 6, 3);
-      this.carvePond(cx + 8, cy + 6, 3);
+      // ---- Strategic water channels (varied per seed) ----
+      const numChannels = 1 + Math.floor(rng() * 2); // 1-2
+      for (let c = 0; c < numChannels; c++) {
+        const chOffX = Math.floor((rng() - 0.5) * 6);
+        const chLen = 6 + Math.floor(rng() * 6);
+        this.carveChannel(cx + chOffX, cy - chLen, cx + chOffX, cy + chLen, 2);
+      }
+      // Ponds
+      const numPonds = 2 + Math.floor(rng() * 2);
+      for (let p = 0; p < numPonds; p++) {
+        const px = cx + (rng() - 0.5) * W * 0.4;
+        const py = cy + (rng() - 0.5) * H * 0.4;
+        this.carvePond(px, py, 2 + Math.floor(rng() * 2));
+      }
 
-      // Create roads connecting bases
-      const baseY = Math.floor(cy);
-      const base1X = 6;
-      const base2X = W - 7;
+      // ---- Bases ----
+      const baseY = Math.floor(cy) + Math.floor((rng() - 0.5) * 4);
+      const base1X = 5 + Math.floor(rng() * 3);
+      const base2X = W - 6 - Math.floor(rng() * 3);
 
-      // Main horizontal roads
-      this.carveRoad(base1X, baseY, base2X, baseY);
-      // Upper path
-      this.carveRoad(base1X + 4, baseY - 10, base2X - 4, baseY - 10);
-      this.carveRoad(base1X + 4, baseY, base1X + 4, baseY - 10);
-      this.carveRoad(base2X - 4, baseY, base2X - 4, baseY - 10);
-      // Lower path
-      this.carveRoad(base1X + 4, baseY + 10, base2X - 4, baseY + 10);
-      this.carveRoad(base1X + 4, baseY, base1X + 4, baseY + 10);
-      this.carveRoad(base2X - 4, baseY, base2X - 4, baseY + 10);
-      // Cross roads
-      this.carveRoad(Math.floor(cx), baseY - 10, Math.floor(cx), baseY + 10);
+      // ---- Roads (3 horizontal lanes + verticals) ----
+      this.carveRoad(base1X, baseY, base2X, baseY); // main
+      const laneOff = 8 + Math.floor(rng() * 5);
+      this.carveRoad(base1X + 4, baseY - laneOff, base2X - 4, baseY - laneOff);
+      this.carveRoad(base1X + 4, baseY + laneOff, base2X - 4, baseY + laneOff);
+      // Verticals
+      this.carveRoad(base1X + 4, baseY, base1X + 4, baseY - laneOff);
+      this.carveRoad(base1X + 4, baseY, base1X + 4, baseY + laneOff);
+      this.carveRoad(base2X - 4, baseY, base2X - 4, baseY - laneOff);
+      this.carveRoad(base2X - 4, baseY, base2X - 4, baseY + laneOff);
+      this.carveRoad(Math.floor(cx), baseY - laneOff, Math.floor(cx), baseY + laneOff);
 
-      // Bridges over water channels
+      // Bridges
+      const bridgeCount = 3 + Math.floor(rng() * 3);
       this.placeBridges(Math.floor(cx), baseY);
-      this.placeBridges(Math.floor(cx), baseY - 10);
-      this.placeBridges(Math.floor(cx), baseY + 10);
+      for (let b = 0; b < bridgeCount; b++) {
+        const bx = Math.floor(cx) + Math.floor((rng() - 0.5) * 10);
+        const by = baseY + Math.floor((rng() - 0.5) * laneOff * 2);
+        this.placeBridges(bx, by);
+      }
 
-      // Base areas (3x3 blocks)
+      // ---- Base areas ----
       this.placeBase(base1X, baseY, 1);
       this.placeBase(base2X, baseY, 2);
-
-      // Flags near bases
       this.team1Flag = { x: base1X + 2, y: baseY };
       this.team2Flag = { x: base2X - 2, y: baseY };
 
-      // Walls (destructible barriers)
-      this.placeWallCluster(Math.floor(cx) - 5, baseY - 3, 3, 6);
-      this.placeWallCluster(Math.floor(cx) + 3, baseY - 3, 3, 6);
-      this.placeWallCluster(Math.floor(cx) - 2, baseY - 14, 4, 2);
-      this.placeWallCluster(Math.floor(cx) - 2, baseY + 13, 4, 2);
-      // Walls near bases
-      this.placeWallCluster(base1X + 6, baseY - 3, 2, 6);
-      this.placeWallCluster(base2X - 7, baseY - 3, 2, 6);
+      // Epic: extra flag towers (decoy positions — actual game flag at normal spot)
+      if (isEpic) {
+        // Place decoy wall-towers near flags
+        this.placeWallCluster(base1X + 3, baseY - 3, 2, 2);
+        this.placeWallCluster(base1X + 3, baseY + 2, 2, 2);
+        this.placeWallCluster(base2X - 4, baseY - 3, 2, 2);
+        this.placeWallCluster(base2X - 4, baseY + 2, 2, 2);
+      }
 
-      // Tree clusters
-      this.placeTreeCluster(15, baseY - 7, 4, 3);
-      this.placeTreeCluster(W - 19, baseY + 5, 4, 3);
-      this.placeTreeCluster(15, baseY + 5, 3, 3);
-      this.placeTreeCluster(W - 18, baseY - 7, 3, 3);
-      this.placeTreeCluster(Math.floor(cx) - 12, baseY - 12, 3, 2);
-      this.placeTreeCluster(Math.floor(cx) + 10, baseY + 11, 3, 2);
+      // ---- Walls (varied) ----
+      const wallClusters = 4 + Math.floor(rng() * 3) + (isEpic ? 4 : 0);
+      for (let w = 0; w < wallClusters; w++) {
+        const wx = Math.floor(cx + (rng() - 0.5) * W * 0.6);
+        const wy = Math.floor(cy + (rng() - 0.5) * H * 0.6);
+        const ww = 2 + Math.floor(rng() * 3);
+        const wh = 2 + Math.floor(rng() * 4);
+        this.placeWallCluster(wx, wy, ww, wh);
+      }
 
-      // Depots
+      // ---- Trees ----
+      const treeClusters = 4 + Math.floor(rng() * 4) + (isEpic ? 3 : 0);
+      for (let t = 0; t < treeClusters; t++) {
+        const tx = Math.floor(base1X + 8 + rng() * (base2X - base1X - 16));
+        const ty = Math.floor(cy + (rng() - 0.5) * H * 0.7);
+        this.placeTreeCluster(tx, ty, 2 + Math.floor(rng() * 3), 2 + Math.floor(rng() * 2));
+      }
+
+      // ---- Depots ----
       this.depots = [];
-      this.placeDepot(20, baseY - 5, T.DEPOT_AMMO);
-      this.placeDepot(W - 21, baseY + 5, T.DEPOT_AMMO);
-      this.placeDepot(Math.floor(cx), baseY - 5, T.DEPOT_AMMO);
-      this.placeDepot(Math.floor(cx), baseY + 5, T.DEPOT_AMMO);
-      this.placeDepot(20, baseY + 5, T.DEPOT_FUEL);
-      this.placeDepot(W - 21, baseY - 5, T.DEPOT_FUEL);
-      this.placeDepot(Math.floor(cx) - 8, baseY, T.DEPOT_FUEL);
-      this.placeDepot(Math.floor(cx) + 8, baseY, T.DEPOT_FUEL);
+      const depotCount = 6 + Math.floor(rng() * 3) + (isEpic ? 2 : 0);
+      for (let d = 0; d < depotCount; d++) {
+        const dx = Math.floor(base1X + 8 + rng() * (base2X - base1X - 16));
+        const dy = Math.floor(cy + (rng() - 0.5) * H * 0.6);
+        const dtype = rng() < 0.5 ? T.DEPOT_AMMO : T.DEPOT_FUEL;
+        this.placeDepot(dx, dy, dtype);
+      }
 
-      // Turrets (defensive positions) - assigned to nearby team
+      // ---- Turrets (2 per side + extras for higher rounds) ----
       this.turrets = [];
-      this.placeTurret(base1X + 5, baseY - 4, 1);
-      this.placeTurret(base1X + 5, baseY + 4, 1);
-      this.placeTurret(base2X - 5, baseY - 4, 2);
-      this.placeTurret(base2X - 5, baseY + 4, 2);
+      const turretsPerSide = 2 + (isEpic ? 2 : Math.min(Math.floor(this.roundNum / 3), 2));
+      for (let t = 0; t < turretsPerSide; t++) {
+        const ty1 = baseY + Math.floor((rng() - 0.5) * laneOff * 1.5);
+        this.placeTurret(base1X + 4 + Math.floor(rng() * 4), ty1, 1);
+        const ty2 = baseY + Math.floor((rng() - 0.5) * laneOff * 1.5);
+        this.placeTurret(base2X - 4 - Math.floor(rng() * 4), ty2, 2);
+      }
 
-      // Make sure base areas are clean
+      // Clean base areas & replant
       this.clearArea(base1X - 1, baseY - 2, 5, 5);
       this.clearArea(base2X - 2, baseY - 2, 5, 5);
       this.placeBase(base1X, baseY, 1);
@@ -450,6 +526,8 @@
     // Serialize for network
     serialize() {
       return {
+        seed: this.seed,
+        roundNum: this.roundNum,
         width: this.width,
         height: this.height,
         tiles: this.tiles,

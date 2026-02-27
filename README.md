@@ -11,7 +11,7 @@ A top-down vehicular **Capture the Flag** shooter inspired by the classic **Retu
 ## 🎮 How to Play
 
 ### Objective
-Steal the enemy team's flag and return it to your base. **First to 3 captures wins!**
+Steal the enemy team's flag and return it to your base. **First to 3 captures wins the round!** Play **10 rounds** — most round wins takes the game.
 
 ### Controls
 | Key | Action |
@@ -28,16 +28,16 @@ Steal the enemy team's flag and return it to your base. **First to 3 captures wi
 | Vehicle | Speed | Armor | Weapon | Special |
 |---------|-------|-------|--------|---------|
 | **Jeep** | ★★★★★ | ★★ | Machine Gun | Only flag carrier! Can cross water briefly |
-| **Tank (M60)** | ★★★ | ★★★★ | 360° Cannon | Balanced fighter, heavy armor |
-| **Helicopter** | ★★★★ | ★★ | Strafe Guns | Flies over terrain, detects mines |
-| **ASV (MLRS)** | ★★ | ★★★★★ | Rockets | Lays instant-kill mines |
+| **BushMaster** | ★★★ | ★★★★ | 360° Cannon | Balanced fighter, heavy armor |
+| **UrbanStrike** | ★★★★ | ★★ | Strafe Guns | Flies over terrain, detects mines |
+| **StrikeMaster** | ★★ | ★★★★★ | Rockets | Lays instant-kill mines |
 
 ### Tips
 - Only the **Jeep** can carry the flag — protect your Jeep!
 - Vehicles have **limited fuel and ammo** — return to base or depots to resupply
 - **Destroy walls** to create new attack routes
-- The **Helicopter** can fly over everything and reveals hidden mines
-- The **ASV** lays mines — great for base defense
+- The **UrbanStrike** can fly over everything and reveals hidden mines
+- The **StrikeMaster** lays mines — great for base defense
 - Your own flag must be at your base to score
 
 ---
@@ -64,6 +64,13 @@ npm start
 #    They connect to http://YOUR_IP:3000
 ```
 
+### Option 3: Play Online (Render.com)
+The game is deployed as a free-tier Web Service on Render:
+
+🌐 **https://your-service-name.onrender.com** *(replace with your actual URL)*
+
+> **Free-tier note:** The server sleeps after ~15 minutes of inactivity. The first connection after idle may take **30–90 seconds** to wake up — you'll see a loading message. Once awake, gameplay is fully responsive. Share the URL with friends — anyone can join!
+
 ---
 
 ## 📁 Project Structure
@@ -73,6 +80,12 @@ npm start
 ├── server.js             # Multiplayer server (Express + Socket.io)
 ├── LICENSE               # MIT License
 ├── README.md             # This file
+├── CHANGELOG.md          # Version history
+├── tests/                # Jest unit tests
+│   ├── setup.js          # Browser mock setup
+│   ├── utils.test.js     # Constants & math helper tests
+│   ├── map.test.js       # Map generation tests
+│   └── vehicles.test.js  # Vehicle stat & lifecycle tests
 └── src/
     ├── index.html        # Game entry point
     ├── css/
@@ -94,6 +107,20 @@ npm start
 
 ---
 
+## 🧪 Testing
+
+```bash
+# Run all unit tests
+npm test
+
+# Tests cover:
+# - utils.js: constants, math helpers, geometry, tile functions
+# - map.js: seeded generation, determinism, escalation, spawn positions
+# - vehicles.js: stats, creation, damage, death, respawn, flag carrying
+```
+
+---
+
 ## 🛠️ Tech Stack
 
 - **Rendering**: HTML5 Canvas 2D
@@ -110,15 +137,18 @@ npm start
 
 Each vehicle has a unique classical-inspired music theme generated in real-time using Web Audio oscillators:
 - **Jeep**: Fast, energetic chase music
-- **Tank**: Heavy, driving Mars-like rhythm (Holst)
-- **Helicopter**: Soaring, triumphant (Valkyries feel)
-- **ASV**: Bombastic, heavy (1812 Overture feel)
+- **BushMaster**: Heavy, driving Mars-like rhythm (Holst)
+- **UrbanStrike**: Soaring, triumphant (Valkyries feel)
+- **StrikeMaster**: Bombastic, heavy (1812 Overture feel)
 
 ---
 
 ## 🎯 Game Features
 
 - ✅ 4 unique vehicles with different play styles
+- ✅ **10-round game** with per-round and final stats screens
+- ✅ **Seed-based procedural maps** — unique terrain each round
+- ✅ Round 10 "EPIC" mode with larger maps
 - ✅ Procedurally generated island maps
 - ✅ Destructible environments (walls, bridges, trees)
 - ✅ AI opponents with patrol/attack/defend/capture behaviors
@@ -130,6 +160,7 @@ Each vehicle has a unique classical-inspired music theme generated in real-time 
 - ✅ Laughing skull death animation
 - ✅ Classical music themes per vehicle
 - ✅ Touch controls for mobile
+- ✅ **44 unit tests** via Jest (`npm test`)
 - ✅ Zero external assets — everything generated in code
 - ✅ MIT License — completely free
 

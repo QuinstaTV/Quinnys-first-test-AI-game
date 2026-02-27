@@ -1,5 +1,79 @@
 # CHANGELOG — Damaged Territory
 
+## v1.3.0 — Render.com Deployment (Online Multiplayer)
+
+### Render Free-Tier Deployment
+- Server uses `process.env.PORT` for Render's dynamic port assignment
+- Added **SIGTERM graceful shutdown** handler for clean redeploys
+- Added `/health` endpoint returning uptime, room & player counts
+- Socket.io CORS updated with explicit `methods: ['GET', 'POST']`
+
+### Client Connection Hardening
+- Socket.io client now served from own server (`/socket.io/socket.io.js`) with CDN fallback
+- Added reconnection config: 5 attempts with 1s backoff
+- Connection timeout bumped to 15s (accommodates Render cold starts)
+- Dynamic origin detection (`io()`) — auto wss:// on HTTPS hosts
+
+### Cold-Start UX
+- Loading screen shows "free server waking up" hint after 3 seconds
+- Styled `.loader-hint` with orange pulsing text
+
+### Infra
+- `package.json`: added `engines.node >= 20.x` for Render compatibility
+- Server listen banner updated for dynamic port display
+
+---
+
+## v1.2.0 — 10-Round System, Stats & Procedural Maps
+
+### 10-Round Game Flow
+- Game now plays **10 rounds** (best-of-10 series)
+- Each round: first to **3 flag captures** wins the round
+- After 10 rounds (or when one team clinches majority), final stats are shown
+- Round indicator in HUD: "ROUND 3/10" with series score display
+
+### Per-Round Stats Tally
+- After each round win, a **5-second stats screen** displays:
+  - Kills, Deaths, Flags captured, Turrets destroyed
+  - Breakdown by team (Blue / Red) and personal ("YOU") column
+  - Series score so far; press ENTER to skip
+
+### Final Game Stats
+- End-of-game screen with **aggregated stats** across all rounds
+- Per-round mini results (which team won each round, flag score)
+- Personal K/D ratio, total flags, turrets destroyed
+- Skulls decoration; ENTER to replay, ESC for menu
+
+### Seed-Based Procedural Maps
+- Every round generates a **unique map** from a deterministic seed
+- Mulberry32 PRNG + value noise for terrain variation
+- Same seed always produces the same map (MP-syncable)
+- Round escalation: later rounds have more turrets, walls, trees
+- **Round 10 = EPIC mode**: larger map (100×62), max turrets & features
+
+### Death → Garage Respawn
+- On vehicle destruction, player returns to **vehicle select immediately** (1.5s animation)
+- Destroyed vehicle type becomes unavailable (except Jeep with lives)
+- If all vehicles lost, enemy scores a point and vehicle pool resets
+
+### SP Vehicle Limits
+- Singleplayer: max **2 AI vehicles** per team on the field
+- 1 friendly AI + 2 enemy AI (previously 4+3)
+- AI respawns respect the limit — won't spawn if team is at cap
+
+### Helicopter → UrbanStrike Rename
+- **Helicopter** renamed to **UrbanStrike** across all files
+- Updated in vehicle stats, UI cards, vehicle select, How To Play, audio comments
+
+### Test Suite
+- Added **Jest** test framework with 44 unit tests
+- `tests/utils.test.js` — Constants, math helpers, geometry, A* pathfinding
+- `tests/map.test.js` — Map generation, seeded determinism, escalation, spawn/flag positions
+- `tests/vehicles.test.js` — Vehicle stats, creation, damage, death, respawn, flag carrying
+- Run with `npm test`
+
+---
+
 ## v1.1.0 — Phase 5 Overhaul
 
 ### Vehicle Renames

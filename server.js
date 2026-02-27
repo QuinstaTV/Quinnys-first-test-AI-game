@@ -12,12 +12,17 @@ const path = require('path');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*' },
+  cors: { origin: '*', methods: ['GET', 'POST'] },
   pingTimeout: 10000,
   pingInterval: 5000
 });
 
 const PORT = process.env.PORT || 3000;
+
+// Health check endpoint (before static — Render keep-alive / monitoring)
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', uptime: process.uptime(), rooms: rooms.size, players: players.size });
+});
 
 // Serve static files from src/
 app.use(express.static(path.join(__dirname, 'src')));
@@ -296,10 +301,23 @@ server.listen(PORT, () => {
   console.log('  ╔═══════════════════════════════════════════╗');
   console.log('  ║     DAMAGED TERRITORY - Game Server       ║');
   console.log('  ╠═══════════════════════════════════════════╣');
-  console.log(`  ║  Server running on http://localhost:${PORT}  ║`);
-  console.log('  ║                                           ║');
+  console.log(`  ║  Port: ${PORT}                                ║`);
   console.log('  ║  Open in browser to play!                 ║');
-  console.log('  ║  Share your IP for multiplayer.           ║');
+  console.log('  ║  Share your URL for multiplayer.          ║');
   console.log('  ╚═══════════════════════════════════════════╝');
   console.log('');
+});
+
+/* ========== GRACEFUL SHUTDOWN (Render sends SIGTERM on deploy/scale) ========== */
+
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received - shutting down gracefully');
+  io.close(() => {
+    server.close(() => {
+      console.log('Server closed');
+      process.exit(0);
+    });
+  });
+  // Force exit after 10s if graceful close stalls
+  setTimeout(() => process.exit(0), 10000);
 });

@@ -1,7 +1,8 @@
 /* ============================================================
-   game.js - Main game orchestrator
-   Game loop, state management, flag logic, camera, turrets,
-   singleplayer and multiplayer mode handling
+   game.js - Main game orchestrator  (v1.2)
+   10-round flow, per-round & final stats, seed-based proc maps,
+   death→garage respawn, SP vehicle limits (1 player / 2 AI),
+   camera, turrets, flag logic, singleplayer & multiplayer
    ============================================================ */
 (function () {
   'use strict';
@@ -35,9 +36,30 @@
     2: { x: 0, y: 0, atBase: true, carried: false, carrier: null, team: 2 }
   };
 
-  // Score
+  // Score (per-round flag captures)
   let score = { team1: 0, team2: 0 };
-  const WIN_SCORE = 3;
+  const WIN_SCORE = 3; // flags per round
+
+  // ========== ROUND SYSTEM (10 rounds) ==========
+  const MAX_ROUNDS = 10;
+  let currentRound = 1;
+  let roundsWon = { team1: 0, team2: 0 };
+  let roundSeed = Date.now();
+
+  // Per-round stats: { kills, deaths, flags, turretsKilled }
+  let roundStats = {
+    player: { kills: 0, deaths: 0, flags: 0, turretsKilled: 0 },
+    team1:  { kills: 0, deaths: 0, flags: 0, turretsKilled: 0 },
+    team2:  { kills: 0, deaths: 0, flags: 0, turretsKilled: 0 }
+  };
+  // Accumulate all rounds
+  let allRoundStats = []; // array of { round, winner, team1:{…}, team2:{…}, player:{…}, time }
+  let roundWinner = 0; // 1 or 2
+
+  // Round-stats screen timer
+  let statsTimer = 0;
+  const STATS_DURATION = 5; // seconds
+
   let gameTime = 0;
   let winner = 0;
 
@@ -52,7 +74,7 @@
   const MAX_JEEP_LIVES = 3;
 
   // Respawn
-  const RESPAWN_TIME = 3;
+  const RESPAWN_TIME = 1.5; // short animation then straight to garage
   let respawnTimer = 0;
   let isRespawning = false;
 
@@ -72,6 +94,9 @@
 
   // Fuel warning
   let fuelWarnTimer = 0;
+
+  // SP AI vehicle limit
+  const MAX_AI_VEHICLES = 2;
 
   /* ========== INITIALIZATION ========== */
   function init() {
@@ -99,7 +124,6 @@
   }
 
   function resizeCanvas() {
-    // Responsive: fit window but maintain minimum
     screenW = Math.max(800, window.innerWidth);
     screenH = Math.max(500, window.innerHeight);
     canvas.width = screenW;
@@ -109,7 +133,7 @@
 
   /* ========== GAME LOOP ========== */
   function gameLoop(timestamp) {
-    const dt = Math.min((timestamp - lastTime) / 1000, 0.05); // cap at 50ms
+    const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
     lastTime = timestamp;
 
     update(dt);
@@ -140,6 +164,12 @@
       case STATE.LOBBY:
         updateLobby(dt);
         break;
+      case STATE.ROUND_STATS:
+        updateRoundStats(dt);
+        break;
+      case STATE.FINAL_STATS:
+        updateFinalStats(dt);
+        break;
     }
   }
 
@@ -153,7 +183,6 @@
       return;
     }
 
-    // Keyboard navigation
     if (Game.Input.wasPressed('ArrowUp') || Game.Input.wasPressed('KeyW')) {
       menuSelection = (menuSelection - 1 + 3) % 3;
       Game.Audio.play('click');
@@ -172,15 +201,15 @@
   function selectMenuItem(index) {
     Game.Audio.play('click');
     switch (index) {
-      case 0: // Single player
+      case 0:
         gameMode = 'single';
         state = STATE.VEHICLE_SELECT;
         break;
-      case 1: // Multiplayer
+      case 1:
         gameMode = 'multi';
         startMultiplayer();
         break;
-      case 2: // How to play
+      case 2:
         showingHowToPlay = true;
         break;
     }
@@ -223,7 +252,6 @@
 
   /* ---------- Vehicle Select ---------- */
   function updateVehicleSelect(dt) {
-    // Only allow selecting available vehicles
     const trySelect = (type) => {
       if (vehiclePool[type]) {
         selectedVehicle = type;
@@ -237,7 +265,6 @@
     if (Game.Input.wasPressed('Digit4')) trySelect(VEH.ASV);
 
     if (Game.Input.wasPressed('ArrowLeft') || Game.Input.wasPressed('KeyA')) {
-      // Skip to next available vehicle going left
       for (let i = 1; i <= 4; i++) {
         const idx = (selectedVehicle - i + 4) % 4;
         if (vehiclePool[idx]) { selectedVehicle = idx; Game.Audio.play('click'); break; }
@@ -255,7 +282,6 @@
         if (map) {
           deployVehicle();
         } else {
-          // First game start — show elevator then start
           Game.UI.startElevatorDeploy(selectedVehicle, function () {
             startGame();
           });
@@ -265,7 +291,6 @@
 
     if (Game.Input.wasPressed('Escape')) {
       if (map) {
-        // If game is in progress, go back to playing (cancel swap)
         state = STATE.PLAYING;
       } else {
         state = STATE.MENU;
@@ -276,8 +301,6 @@
   /* ---------- Deploy Vehicle (mid-game) ---------- */
   function deployVehicle() {
     Game.Audio.play('click');
-
-    // Trigger elevator animation, then actually spawn
     Game.UI.startElevatorDeploy(selectedVehicle, function () {
       finishDeploy();
     });
@@ -290,7 +313,6 @@
       allVehicles.splice(idx, 1);
     }
 
-    // Create new player vehicle at spawn
     const spawn = map.getSpawn(1);
     playerVehicle = Game.createVehicle(selectedVehicle, 1, spawn.x + randFloat(-20, 20), spawn.y + randFloat(-20, 20));
     playerVehicle.isPlayer = true;
@@ -300,15 +322,31 @@
     state = STATE.PLAYING;
   }
 
-  /* ---------- Start Game ---------- */
+  /* ========== START GAME (round 1) ========== */
   function startGame() {
     Game.Audio.play('click');
 
-    // Create map
-    map = new Game.GameMap();
-    map.generate();
+    // Reset all round tracking
+    currentRound = 1;
+    roundsWon = { team1: 0, team2: 0 };
+    allRoundStats = [];
+    roundSeed = Date.now();
 
-    // Reset
+    startRound();
+  }
+
+  function startRound() {
+    // Generate seed-based map for this round
+    const seed = roundSeed + currentRound;
+    map = new Game.GameMap();
+    try {
+      map.generate(seed, currentRound);
+    } catch (e) {
+      console.warn('Map gen failed, fallback', e);
+      map.generate(); // fallback
+    }
+
+    // Reset per-round state
     Game.resetVehicleIds();
     Game.Projectiles.clear();
     Game.Particles.clear();
@@ -317,9 +355,11 @@
     score = { team1: 0, team2: 0 };
     gameTime = 0;
     winner = 0;
+    roundWinner = 0;
     isRespawning = false;
-    vehiclePool = [true, true, true, true]; // reset vehicle availability
-    jeepLives = MAX_JEEP_LIVES; // reset jeep lives
+    vehiclePool = [true, true, true, true];
+    jeepLives = MAX_JEEP_LIVES;
+    resetRoundStats();
 
     // Create player vehicle
     const spawn = map.getSpawn(1);
@@ -327,20 +367,25 @@
     playerVehicle.isPlayer = true;
     allVehicles.push(playerVehicle);
 
-    // Create AI team (enemy)
+    // Create AI (SP mode)
     if (gameMode === 'single') {
-      const aiTeamData = Game.spawnAITeam(map, 2, 4);
+      // SP limit: max 2 AI vehicles total on each team
+      const aiEnemyCount = Math.min(MAX_AI_VEHICLES, 2);
+      const aiFriendlyCount = Math.min(MAX_AI_VEHICLES - 1, 1); // 1 friendly AI
+
+      const aiTeamData = Game.spawnAITeam(map, 2, aiEnemyCount);
       aiTeamData.forEach(d => {
         allVehicles.push(d.vehicle);
         aiControllers.push(d.ai);
       });
 
-      // Also create friendly AI
-      const friendlyAI = Game.spawnAITeam(map, 1, 3);
-      friendlyAI.forEach(d => {
-        allVehicles.push(d.vehicle);
-        aiControllers.push(d.ai);
-      });
+      if (aiFriendlyCount > 0) {
+        const friendlyAI = Game.spawnAITeam(map, 1, aiFriendlyCount);
+        friendlyAI.forEach(d => {
+          allVehicles.push(d.vehicle);
+          aiControllers.push(d.ai);
+        });
+      }
     }
 
     // Reset flags
@@ -351,13 +396,102 @@
       2: { x: f2Pos.x, y: f2Pos.y, atBase: true, carried: false, carrier: null, team: 2 }
     };
 
-    // Turrets
     turrets = map.turrets;
 
-    // Play music for selected vehicle
     Game.Audio.playMusic(selectedVehicle);
-
+    Game.UI.notify('ROUND ' + currentRound + (currentRound >= 10 ? ' \u2014 EPIC!' : ''), '#ff6600', 3);
     state = STATE.PLAYING;
+  }
+
+  /* ========== STATS HELPERS ========== */
+  function resetRoundStats() {
+    roundStats = {
+      player: { kills: 0, deaths: 0, flags: 0, turretsKilled: 0 },
+      team1:  { kills: 0, deaths: 0, flags: 0, turretsKilled: 0 },
+      team2:  { kills: 0, deaths: 0, flags: 0, turretsKilled: 0 }
+    };
+  }
+
+  function recordKill(killerTeam, isPlayer) {
+    if (killerTeam === 1) roundStats.team1.kills++;
+    else roundStats.team2.kills++;
+    if (isPlayer) roundStats.player.kills++;
+  }
+
+  function recordDeath(victimTeam, isPlayer) {
+    if (victimTeam === 1) roundStats.team1.deaths++;
+    else roundStats.team2.deaths++;
+    if (isPlayer) roundStats.player.deaths++;
+  }
+
+  function recordFlag(team, isPlayer) {
+    if (team === 1) roundStats.team1.flags++;
+    else roundStats.team2.flags++;
+    if (isPlayer) roundStats.player.flags++;
+  }
+
+  function recordTurretKill(killerTeam, isPlayer) {
+    if (killerTeam === 1) roundStats.team1.turretsKilled++;
+    else roundStats.team2.turretsKilled++;
+    if (isPlayer) roundStats.player.turretsKilled++;
+  }
+
+  /* ========== END ROUND -> STATS ========== */
+  function endRound(winTeam) {
+    roundWinner = winTeam;
+    if (winTeam === 1) roundsWon.team1++;
+    else roundsWon.team2++;
+
+    allRoundStats.push({
+      round: currentRound,
+      winner: winTeam,
+      team1: { ...roundStats.team1 },
+      team2: { ...roundStats.team2 },
+      player: { ...roundStats.player },
+      time: gameTime,
+      score: { team1: score.team1, team2: score.team2 }
+    });
+
+    Game.Audio.stopMusic();
+    Game.Audio.play('score');
+    statsTimer = STATS_DURATION;
+    state = STATE.ROUND_STATS;
+  }
+
+  function updateRoundStats(dt) {
+    statsTimer -= dt;
+    if (statsTimer <= 0 || Game.Input.wasPressed('Enter') || Game.Input.wasPressed('Space')) {
+      // Check if game is over
+      const gameOver = currentRound >= MAX_ROUNDS ||
+                       roundsWon.team1 > MAX_ROUNDS / 2 ||
+                       roundsWon.team2 > MAX_ROUNDS / 2;
+      if (gameOver) {
+        winner = roundsWon.team1 >= roundsWon.team2 ? 1 : 2;
+        state = STATE.FINAL_STATS;
+      } else {
+        // Next round
+        currentRound++;
+        // Pre-select first available vehicle
+        for (let i = 0; i < 4; i++) {
+          selectedVehicle = i;
+          break;
+        }
+        startRound();
+      }
+    }
+  }
+
+  function updateFinalStats(dt) {
+    if (Game.Input.wasPressed('Enter') || Game.Input.wasPressed('Space')) {
+      map = null;
+      state = STATE.VEHICLE_SELECT;
+      vehiclePool = [true, true, true, true];
+      jeepLives = MAX_JEEP_LIVES;
+    }
+    if (Game.Input.wasPressed('Escape')) {
+      map = null;
+      state = STATE.MENU;
+    }
   }
 
   /* ---------- Playing ---------- */
@@ -379,67 +513,64 @@
       if (on && playerVehicle) Game.Audio.playMusic(playerVehicle.type);
     }
 
-    // Handle respawn → now goes to vehicle select
+    // Handle respawn -> goes to vehicle select quickly
     if (isRespawning) {
       respawnTimer -= dt;
       if (respawnTimer <= 0) {
         isRespawning = false;
+
         // Mark destroyed vehicle type as unavailable
-        // Jeep has multiple lives
         if (playerVehicle.type === VEH.JEEP) {
           jeepLives--;
           if (jeepLives <= 0) {
             vehiclePool[VEH.JEEP] = false;
             Game.UI.notify('Jeep out of lives!', '#ff4444', 2);
           } else {
-            Game.UI.notify(`Jeep lives remaining: ${jeepLives}`, '#ffaa00', 2);
+            Game.UI.notify('Jeep lives remaining: ' + jeepLives, '#ffaa00', 2);
           }
         } else {
           vehiclePool[playerVehicle.type] = false;
         }
 
         // Check if all vehicles destroyed
-        const anyAvailable = vehiclePool.some(v => v);
+        var anyAvailable = vehiclePool.some(function (v) { return v; });
         if (!anyAvailable) {
           // All vehicles destroyed - point to opponent, reset pool
           score.team2++;
+          recordFlag(2, false);
           vehiclePool = [true, true, true, true];
           jeepLives = MAX_JEEP_LIVES;
           Game.UI.notify('All vehicles lost! Enemy scores!', '#ff4444', 3);
           Game.Audio.play('score');
 
-          // Check win
+          // Check round win
           if (score.team2 >= WIN_SCORE) {
-            winner = 2;
-            state = STATE.GAME_OVER;
-            Game.Audio.stopMusic();
+            endRound(2);
             return;
           }
         }
 
-        // Go to vehicle select with available vehicles
+        // Go to vehicle select
         state = STATE.VEHICLE_SELECT;
-        // Pre-select first available vehicle
-        for (let i = 0; i < 4; i++) {
-          if (vehiclePool[i]) { selectedVehicle = i; break; }
+        for (var vi = 0; vi < 4; vi++) {
+          if (vehiclePool[vi]) { selectedVehicle = vi; break; }
         }
       }
-      // Still update world while respawning
     }
 
     // Player input
     if (playerVehicle && playerVehicle.alive) {
-      const move = Game.Input.getMovement();
+      var move = Game.Input.getMovement();
       playerVehicle.move(move.dx, move.dy, dt, map);
 
       // BushMaster (Tank) turret auto-aim at nearest enemy
       if (playerVehicle.type === VEH.TANK) {
-        let nearestEnemy = null;
-        let nearestDist = 400; // auto-aim range
-        for (let v = 0; v < allVehicles.length; v++) {
-          const veh = allVehicles[v];
+        var nearestEnemy = null;
+        var nearestDist = 400;
+        for (var v = 0; v < allVehicles.length; v++) {
+          var veh = allVehicles[v];
           if (!veh.alive || veh.team === playerVehicle.team) continue;
-          const d = dist(playerVehicle.x, playerVehicle.y, veh.x, veh.y);
+          var d = dist(playerVehicle.x, playerVehicle.y, veh.x, veh.y);
           if (d < nearestDist) {
             nearestDist = d;
             nearestEnemy = veh;
@@ -448,11 +579,8 @@
         if (nearestEnemy) {
           playerVehicle.aimTurret(nearestEnemy.x, nearestEnemy.y, dt);
         } else {
-          // No enemy in range: turret follows mouse
-          const mousePos = Game.Input.getMousePos();
-          const worldMX = mousePos.x + camX;
-          const worldMY = mousePos.y + camY;
-          playerVehicle.aimTurret(worldMX, worldMY, dt);
+          var mousePos = Game.Input.getMousePos();
+          playerVehicle.aimTurret(mousePos.x + camX, mousePos.y + camY, dt);
         }
       }
 
@@ -466,20 +594,17 @@
         playerVehicle.layMine();
       }
 
-      // Return to base (R key) — swap vehicle without losing it
-      const basePosR = map.getBasePos(playerVehicle.team);
-      const distToBase = dist(playerVehicle.x, playerVehicle.y, basePosR.x, basePosR.y);
+      // Return to base (R key)
+      var basePosR = map.getBasePos(playerVehicle.team);
+      var distToBase = dist(playerVehicle.x, playerVehicle.y, basePosR.x, basePosR.y);
       playerVehicle._atOwnBase = distToBase < 60;
 
       if (Game.Input.wasPressed('KeyR') && playerVehicle._atOwnBase) {
-        // Return current vehicle to pool (not destroyed)
         Game.Audio.play('click');
         Game.UI.notify('Returning to base...', '#aaa', 1.5);
-        // Vehicle stays available in pool
         state = STATE.VEHICLE_SELECT;
-        // Remove old vehicle
-        const idx = allVehicles.indexOf(playerVehicle);
-        if (idx !== -1) allVehicles.splice(idx, 1);
+        var spliceIdx = allVehicles.indexOf(playerVehicle);
+        if (spliceIdx !== -1) allVehicles.splice(spliceIdx, 1);
       }
 
       playerVehicle.update(dt, map);
@@ -489,37 +614,56 @@
         fuelWarnTimer -= dt;
         if (fuelWarnTimer <= 0) {
           Game.Audio.play('fuelwarn');
-          fuelWarnTimer = 2.0; // beep every 2 seconds
+          fuelWarnTimer = 2.0;
         }
       } else {
         fuelWarnTimer = 0;
       }
 
-      // Check player death
+      // Check player death -> immediate garage return
       if (!playerVehicle.alive && !isRespawning) {
         isRespawning = true;
         respawnTimer = RESPAWN_TIME;
+        recordDeath(playerVehicle.team, true);
         Game.Audio.stopMusic();
         Game.UI.notify('Vehicle destroyed!', '#ff4444', 2);
       }
     }
 
-    // Update AI
-    for (let i = 0; i < aiControllers.length; i++) {
-      const ai = aiControllers[i];
-      const v = ai.vehicle;
+    // Update AI (with SP vehicle limits)
+    for (var ai_i = 0; ai_i < aiControllers.length; ai_i++) {
+      var aiCtrl = aiControllers[ai_i];
+      var aiVeh = aiCtrl.vehicle;
 
-      if (!v.alive) {
-        v.deathTimer += dt;
-        if (v.deathTimer > RESPAWN_TIME) {
-          const spawn = map.getSpawn(v.team);
-          v.respawn(spawn.x + randFloat(-30, 30), spawn.y + randFloat(-30, 30));
+      if (!aiVeh.alive) {
+        if (typeof aiVeh.deathTimer === 'undefined') aiVeh.deathTimer = 0;
+        aiVeh.deathTimer += dt;
+        // AI auto-respawn after timer, but respect vehicle limits
+        if (aiVeh.deathTimer > RESPAWN_TIME + 2) {
+          if (gameMode === 'single') {
+            // Count alive AI on same team
+            var aliveCount = 0;
+            for (var ac = 0; ac < allVehicles.length; ac++) {
+              if (allVehicles[ac].alive && allVehicles[ac].isAI && allVehicles[ac].team === aiVeh.team) {
+                aliveCount++;
+              }
+            }
+            if (aliveCount < MAX_AI_VEHICLES) {
+              var aiSpawn = map.getSpawn(aiVeh.team);
+              aiVeh.respawn(aiSpawn.x + randFloat(-30, 30), aiSpawn.y + randFloat(-30, 30));
+              aiVeh.deathTimer = 0;
+            }
+          } else {
+            var aiSpawnMP = map.getSpawn(aiVeh.team);
+            aiVeh.respawn(aiSpawnMP.x + randFloat(-30, 30), aiSpawnMP.y + randFloat(-30, 30));
+            aiVeh.deathTimer = 0;
+          }
         }
         continue;
       }
 
-      v.update(dt, map);
-      ai.update(dt, allVehicles, flags, { score });
+      aiVeh.update(dt, map);
+      aiCtrl.update(dt, allVehicles, flags, { score: score });
     }
 
     // Update projectiles
@@ -537,17 +681,13 @@
     // Flag logic
     updateFlags(dt);
 
-    // Check win condition
+    // Check round win condition (first to WIN_SCORE flags)
     if (score.team1 >= WIN_SCORE) {
-      winner = 1;
-      state = STATE.GAME_OVER;
-      Game.Audio.stopMusic();
-      Game.Audio.play('score');
+      endRound(1);
+      return;
     } else if (score.team2 >= WIN_SCORE) {
-      winner = 2;
-      state = STATE.GAME_OVER;
-      Game.Audio.stopMusic();
-      Game.Audio.play('score');
+      endRound(2);
+      return;
     }
 
     // Camera
@@ -568,7 +708,7 @@
     // Network sync
     if (gameMode === 'multi' && Game.Network.connected) {
       netSyncTimer += dt;
-      if (netSyncTimer >= 0.05) { // 20 ticks/sec
+      if (netSyncTimer >= 0.05) {
         netSyncTimer = 0;
         if (playerVehicle) {
           Game.Network.sendState(playerVehicle.serialize());
@@ -579,8 +719,15 @@
 
   function onVehicleHit(vehicle, projectile) {
     if (!vehicle.alive) {
-      // Vehicle just died
-      const killer = allVehicles.find(v => v.id === projectile.owner);
+      // Vehicle just died - record stats
+      var killer = null;
+      for (var vi = 0; vi < allVehicles.length; vi++) {
+        if (allVehicles[vi].id === projectile.owner) { killer = allVehicles[vi]; break; }
+      }
+      if (killer) {
+        recordKill(killer.team, killer.isPlayer);
+        recordDeath(vehicle.team, vehicle.isPlayer);
+      }
       if (killer && killer.isPlayer) {
         Game.UI.notify('Enemy destroyed!', '#ff6600', 2);
       }
@@ -592,24 +739,22 @@
 
   /* ---------- Turrets ---------- */
   function updateTurrets(dt) {
-    for (let i = 0; i < turrets.length; i++) {
-      const t = turrets[i];
+    for (var i = 0; i < turrets.length; i++) {
+      var t = turrets[i];
       if (!t.alive) continue;
 
       t.cooldown -= dt;
 
-      // Find nearest enemy (skip friendlies)
-      let nearestEnemy = null;
-      let nearestDist = 300; // turret range
-      const tWorldX = t.x * TILE + TILE / 2;
-      const tWorldY = t.y * TILE + TILE / 2;
+      var nearestEnemy = null;
+      var nearestDist = 300;
+      var tWorldX = t.x * TILE + TILE / 2;
+      var tWorldY = t.y * TILE + TILE / 2;
 
-      for (let v = 0; v < allVehicles.length; v++) {
-        const veh = allVehicles[v];
+      for (var v = 0; v < allVehicles.length; v++) {
+        var veh = allVehicles[v];
         if (!veh.alive) continue;
-        // Skip friendly vehicles - turrets don't fire on own team
         if (t.team !== 0 && veh.team === t.team) continue;
-        const d = dist(tWorldX, tWorldY, veh.x, veh.y);
+        var d = dist(tWorldX, tWorldY, veh.x, veh.y);
         if (d < nearestDist) {
           nearestDist = d;
           nearestEnemy = veh;
@@ -617,14 +762,12 @@
       }
 
       if (nearestEnemy) {
-        // Rotate turret towards enemy
-        const targetAngle = angleTo(tWorldX, tWorldY, nearestEnemy.x, nearestEnemy.y);
+        var targetAngle = angleTo(tWorldX, tWorldY, nearestEnemy.x, nearestEnemy.y);
         t.angle = targetAngle;
 
-        // Shoot
         if (t.cooldown <= 0) {
-          const muzzleX = tWorldX + Math.cos(t.angle) * 14;
-          const muzzleY = tWorldY + Math.sin(t.angle) * 14;
+          var muzzleX = tWorldX + Math.cos(t.angle) * 14;
+          var muzzleY = tWorldY + Math.sin(t.angle) * 14;
           Game.Projectiles.fire(muzzleX, muzzleY, t.angle, 'BULLET', -100 - i, t.team);
           t.cooldown = 0.5;
         }
@@ -634,16 +777,15 @@
 
   /* ---------- Turret Damage ---------- */
   function updateTurretDamage() {
-    const projs = Game.Projectiles.getProjectiles();
-    for (let i = projs.length - 1; i >= 0; i--) {
-      const p = projs[i];
-      for (let j = 0; j < turrets.length; j++) {
-        const t = turrets[j];
+    var projs = Game.Projectiles.getProjectiles();
+    for (var i = projs.length - 1; i >= 0; i--) {
+      var p = projs[i];
+      for (var j = 0; j < turrets.length; j++) {
+        var t = turrets[j];
         if (!t.alive) continue;
-        // Skip friendly projectiles
         if (p.team === t.team && t.team !== 0) continue;
-        const tWorldX = t.x * TILE + TILE / 2;
-        const tWorldY = t.y * TILE + TILE / 2;
+        var tWorldX = t.x * TILE + TILE / 2;
+        var tWorldY = t.y * TILE + TILE / 2;
         if (dist(p.x, p.y, tWorldX, tWorldY) < 16) {
           t.hp -= p.explosive ? 30 : p.damage;
           Game.Particles.sparks(p.x, p.y, 4);
@@ -652,9 +794,16 @@
             t.hp = 0;
             Game.Particles.explosion(tWorldX, tWorldY, 1.5, 15);
             if (Game.Audio) Game.Audio.play('explosion');
+            // Record turret kill stat
+            var killer = null;
+            for (var vi = 0; vi < allVehicles.length; vi++) {
+              if (allVehicles[vi].id === p.owner) { killer = allVehicles[vi]; break; }
+            }
+            if (killer) {
+              recordTurretKill(killer.team, killer.isPlayer);
+            }
             Game.UI.notify('Turret destroyed!', '#ff6600', 2);
           }
-          // Remove projectile
           projs.splice(i, 1);
           break;
         }
@@ -664,59 +813,58 @@
 
   /* ---------- Flags ---------- */
   function updateFlags(dt) {
-    for (let team = 1; team <= 2; team++) {
-      const f = flags[team];
-      const enemyTeam = team === 1 ? 2 : 1;
+    for (var team = 1; team <= 2; team++) {
+      var f = flags[team];
+      var enemyTeam = team === 1 ? 2 : 1;
 
       if (f.carried && f.carrier) {
-        // Move flag with carrier
         f.x = f.carrier.x;
         f.y = f.carrier.y;
 
-        // Check if carrier died
         if (!f.carrier.alive) {
           f.carried = false;
           f.carrier.hasFlag = false;
           f.carrier.flagTeam = 0;
           f.carrier = null;
-          Game.UI.notify(`${team === 1 ? 'Blue' : 'Red'} flag dropped!`, team === 1 ? '#3388ff' : '#ff4444', 2);
+          Game.UI.notify((team === 1 ? 'Blue' : 'Red') + ' flag dropped!', team === 1 ? '#3388ff' : '#ff4444', 2);
           if (Game.Audio) Game.Audio.play('pickup');
 
-          // Flag returns to base after being dropped
-          setTimeout(() => {
-            if (!f.carried) {
-              const basePos = map.getFlagPos(team);
-              f.x = basePos.x;
-              f.y = basePos.y;
-              f.atBase = true;
-              Game.UI.notify(`${team === 1 ? 'Blue' : 'Red'} flag returned!`, '#aaa', 2);
-            }
-          }, 10000);
+          // Return flag to base after 10s if not picked up
+          (function(flag, flagTeam) {
+            setTimeout(function () {
+              if (!flag.carried) {
+                var basePos = map.getFlagPos(flagTeam);
+                flag.x = basePos.x;
+                flag.y = basePos.y;
+                flag.atBase = true;
+                Game.UI.notify((flagTeam === 1 ? 'Blue' : 'Red') + ' flag returned!', '#aaa', 2);
+              }
+            }, 10000);
+          })(f, team);
         }
 
-        // Check if carrier reached their own base (score!)
         if (f.carrier) {
-          const basePos = map.getBasePos(f.carrier.team);
+          var basePos = map.getBasePos(f.carrier.team);
           if (dist(f.carrier.x, f.carrier.y, basePos.x, basePos.y) < 50) {
-            // CHECK: carrier team's OWN flag must be at base to score
-            const ownFlag = flags[f.carrier.team];
+            var ownFlag = flags[f.carrier.team];
             if (ownFlag.atBase) {
               // SCORE!
               if (f.carrier.team === 1) score.team1++;
               else score.team2++;
 
+              recordFlag(f.carrier.team, f.carrier.isPlayer);
+
               Game.Audio.play('score');
               Game.UI.notify(
-                `${f.carrier.team === 1 ? 'Blue' : 'Red'} team SCORES!`,
+                (f.carrier.team === 1 ? 'Blue' : 'Red') + ' team SCORES!',
                 f.carrier.team === 1 ? '#3388ff' : '#ff4444', 3
               );
 
-              // Reset flag
               f.carrier.hasFlag = false;
               f.carrier.flagTeam = 0;
               f.carrier = null;
               f.carried = false;
-              const flagHome = map.getFlagPos(team);
+              var flagHome = map.getFlagPos(team);
               f.x = flagHome.x;
               f.y = flagHome.y;
               f.atBase = true;
@@ -724,22 +872,21 @@
           }
         }
       } else {
-        // Flag is on the ground - check for pickup
-        for (let v = 0; v < allVehicles.length; v++) {
-          const veh = allVehicles[v];
+        for (var v = 0; v < allVehicles.length; v++) {
+          var veh = allVehicles[v];
           if (!veh.alive) continue;
           if (veh.team === team) {
-            // Own team touches flag = return to base
+            // Own team can return their dropped flag
             if (!f.atBase && dist(veh.x, veh.y, f.x, f.y) < 30) {
-              const basePos = map.getFlagPos(team);
-              f.x = basePos.x;
-              f.y = basePos.y;
+              var returnBase = map.getFlagPos(team);
+              f.x = returnBase.x;
+              f.y = returnBase.y;
               f.atBase = true;
-              Game.UI.notify(`${team === 1 ? 'Blue' : 'Red'} flag returned!`, '#aaa', 2);
+              Game.UI.notify((team === 1 ? 'Blue' : 'Red') + ' flag returned!', '#aaa', 2);
               if (Game.Audio) Game.Audio.play('pickup');
             }
           } else {
-            // Enemy team touches flag = pickup (only jeep can carry!)
+            // Enemy team can pick up flag
             if (veh.canCarryFlag && !veh.hasFlag && dist(veh.x, veh.y, f.x, f.y) < 30) {
               f.carried = true;
               f.carrier = veh;
@@ -747,7 +894,7 @@
               veh.hasFlag = true;
               veh.flagTeam = team;
               Game.UI.notify(
-                `${veh.team === 1 ? 'Blue' : 'Red'} stole the ${team === 1 ? 'blue' : 'red'} flag!`,
+                (veh.team === 1 ? 'Blue' : 'Red') + ' stole the ' + (team === 1 ? 'blue' : 'red') + ' flag!',
                 veh.team === 1 ? '#66aaff' : '#ff7777', 3
               );
               if (Game.Audio) Game.Audio.play('pickup');
@@ -762,27 +909,22 @@
   function updateCamera(dt) {
     if (!playerVehicle) return;
 
-    // Target: center player on screen
-    let targetX = playerVehicle.x - screenW / 2;
-    let targetY = playerVehicle.y - screenH / 2;
+    var targetX = playerVehicle.x - screenW / 2;
+    var targetY = playerVehicle.y - screenH / 2;
 
-    // Clamp to map bounds
     targetX = clamp(targetX, 0, map.worldW - screenW);
     targetY = clamp(targetY, 0, map.worldH - screenH);
 
-    // Smooth follow
     camX += (targetX - camX) * 8 * dt;
     camY += (targetY - camY) * 8 * dt;
 
-    // Apply shake
     camX += shakeX;
     camY += shakeY;
   }
 
-  /* ---------- Game Over ---------- */
+  /* ---------- Game Over (legacy - redirects to FINAL_STATS) ---------- */
   function updateGameOver(dt) {
     if (Game.Input.wasPressed('Enter') || Game.Input.wasPressed('Space')) {
-      // Reset for new round with fresh map
       map = null;
       vehiclePool = [true, true, true, true];
       jeepLives = MAX_JEEP_LIVES;
@@ -799,40 +941,32 @@
     state = STATE.LOBBY;
     Game.UI.lobbyStatus = 'Connecting...';
 
-    Game.Network.connect().then(id => {
+    Game.Network.connect().then(function (id) {
       Game.UI.lobbyStatus = 'Connected! ID: ' + id.substring(0, 8);
       Game.Network.requestRooms();
-    }).catch(err => {
+    }).catch(function (err) {
       Game.UI.lobbyStatus = 'Cannot connect: ' + err.message +
         ' (Start server with: node server.js)';
     });
 
-    // Network callbacks
-    Game.Network.on('onRoomList', (rooms) => {
+    Game.Network.on('onRoomList', function (rooms) {
       Game.UI.lobbyRooms = rooms;
     });
-
-    Game.Network.on('onRoomJoined', (data) => {
-      Game.UI.lobbyStatus = `Joined room: ${data.roomId} as Team ${data.team}`;
+    Game.Network.on('onRoomJoined', function (data) {
+      Game.UI.lobbyStatus = 'Joined room: ' + data.roomId + ' as Team ' + data.team;
       Game.UI.notify('Joined room!', '#0f0', 2);
-      // Go to vehicle select
       state = STATE.VEHICLE_SELECT;
     });
-
-    Game.Network.on('onGameStart', (data) => {
-      // Start multiplayer game
+    Game.Network.on('onGameStart', function (data) {
       startMultiplayerGame(data);
     });
-
-    Game.Network.on('onGameState', (data) => {
+    Game.Network.on('onGameState', function (data) {
       handleNetworkState(data);
     });
-
-    Game.Network.on('onTileDestroyed', (data) => {
+    Game.Network.on('onTileDestroyed', function (data) {
       if (map) map.destroyTile(data.tx, data.ty);
     });
-
-    Game.Network.on('onDisconnect', () => {
+    Game.Network.on('onDisconnect', function () {
       Game.UI.lobbyStatus = 'Disconnected from server';
       Game.UI.notify('Disconnected!', '#f00', 3);
     });
@@ -846,10 +980,11 @@
   }
 
   function startMultiplayerGame(data) {
-    // Similar to startGame but uses network data
     map = new Game.GameMap();
     if (data.map) {
       map.loadFromData(data.map);
+    } else if (data.mapSeed !== undefined) {
+      map.generate(data.mapSeed, 1);
     } else {
       map.generate();
     }
@@ -863,8 +998,8 @@
     gameTime = 0;
     winner = 0;
 
-    const team = Game.Network.playerTeam;
-    const spawn = map.getSpawn(team);
+    var team = Game.Network.playerTeam;
+    var spawn = map.getSpawn(team);
     playerVehicle = Game.createVehicle(selectedVehicle, team, spawn.x, spawn.y);
     playerVehicle.isPlayer = true;
     playerVehicle.networkId = Game.Network.playerId;
@@ -875,10 +1010,12 @@
   }
 
   function handleNetworkState(data) {
-    // Update or create remote player vehicles
     if (data.playerId === Game.Network.playerId) return;
 
-    let remote = allVehicles.find(v => v.networkId === data.playerId);
+    var remote = null;
+    for (var ri = 0; ri < allVehicles.length; ri++) {
+      if (allVehicles[ri].networkId === data.playerId) { remote = allVehicles[ri]; break; }
+    }
     if (!remote && data.alive !== false) {
       remote = Game.createVehicle(
         data.type || VEH.TANK,
@@ -920,6 +1057,15 @@
         Game.UI.renderGameOver(winner, score);
         break;
 
+      case STATE.ROUND_STATS:
+        renderGame();
+        Game.UI.renderRoundStats(roundWinner, score, roundStats, currentRound, roundsWon, statsTimer);
+        break;
+
+      case STATE.FINAL_STATS:
+        Game.UI.renderFinalStats(winner, roundsWon, allRoundStats, MAX_ROUNDS);
+        break;
+
       case STATE.LOBBY:
         Game.UI.renderLobby(Game.Network.lobby.rooms, Game.UI.lobbyStatus);
         break;
@@ -934,17 +1080,16 @@
     // Map
     map.render(ctx, camX, camY, screenW, screenH);
 
-    // Flags at base or dropped (not carried - carried ones drawn on vehicle)
-    for (let team = 1; team <= 2; team++) {
-      const f = flags[team];
+    // Flags
+    for (var team = 1; team <= 2; team++) {
+      var f = flags[team];
       if (!f.carried) {
-        const sprite = Game.Sprites.sprites[`flag_${team}`];
+        var sprite = Game.Sprites.sprites['flag_' + team];
         if (sprite) {
-          const sx = f.x - camX - 10;
-          const sy = f.y - camY - 20;
-          // Pulsing glow
+          var sx = f.x - camX - 10;
+          var sy = f.y - camY - 20;
           ctx.fillStyle = team === 1 ? 'rgba(51,136,255,0.3)' : 'rgba(255,68,68,0.3)';
-          const pulse = 8 + Math.sin(Date.now() * 0.004) * 4;
+          var pulse = 8 + Math.sin(Date.now() * 0.004) * 4;
           ctx.beginPath();
           ctx.arc(f.x - camX, f.y - camY, pulse, 0, Math.PI * 2);
           ctx.fill();
@@ -954,13 +1099,12 @@
     }
 
     // Turrets
-    for (let i = 0; i < turrets.length; i++) {
-      const t = turrets[i];
-      const tx = t.x * TILE + TILE / 2 - camX;
-      const ty = t.y * TILE + TILE / 2 - camY;
+    for (var i = 0; i < turrets.length; i++) {
+      var t = turrets[i];
+      var tx = t.x * TILE + TILE / 2 - camX;
+      var ty = t.y * TILE + TILE / 2 - camY;
 
       if (!t.alive) {
-        // Destroyed turret: rubble
         ctx.fillStyle = 'rgba(80,80,80,0.5)';
         ctx.beginPath();
         ctx.arc(tx, ty, 8, 0, Math.PI * 2);
@@ -968,7 +1112,6 @@
         continue;
       }
 
-      // Barrel
       ctx.save();
       ctx.translate(tx, ty);
       ctx.rotate(t.angle);
@@ -976,31 +1119,27 @@
       ctx.fillRect(0, -2, 16, 4);
       ctx.restore();
 
-      // HP bar (show when damaged)
       if (t.hp < 60) {
-        const barW = 20;
-        const barH = 3;
-        const bx = tx - barW / 2;
-        const by = ty - 14;
+        var barW = 20, barH = 3;
+        var bx = tx - barW / 2, by = ty - 14;
         ctx.fillStyle = '#333';
         ctx.fillRect(bx, by, barW, barH);
-        const hpRatio = t.hp / 60;
+        var hpRatio = t.hp / 60;
         ctx.fillStyle = hpRatio > 0.5 ? '#0f0' : hpRatio > 0.25 ? '#ff0' : '#f00';
         ctx.fillRect(bx, by, barW * hpRatio, barH);
       }
 
-      // Team indicator dot
       ctx.fillStyle = t.team === 1 ? 'rgba(51,136,255,0.6)' : t.team === 2 ? 'rgba(255,68,68,0.6)' : 'rgba(128,128,128,0.6)';
       ctx.beginPath();
       ctx.arc(tx, ty, 4, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Mine layer markers (semi-transparent circles for mine detection by heli)
+    // Mine detection by UrbanStrike
     if (playerVehicle && playerVehicle.type === VEH.HELI && playerVehicle.alive) {
-      const mines = Game.Projectiles.getMines();
-      for (let i = 0; i < mines.length; i++) {
-        const m = mines[i];
+      var mines = Game.Projectiles.getMines();
+      for (var mi = 0; mi < mines.length; mi++) {
+        var m = mines[mi];
         if (!m.alive) continue;
         ctx.strokeStyle = 'rgba(255,0,0,0.5)';
         ctx.lineWidth = 1;
@@ -1010,67 +1149,63 @@
       }
     }
 
-    // Render projectiles (includes mines)
     Game.Projectiles.render(ctx, camX, camY);
 
-    // Vehicles (ground first, then air)
-    // Sort: ground vehicles first, then helicopters
-    const groundVehicles = allVehicles.filter(v => v.type !== VEH.HELI);
-    const airVehicles = allVehicles.filter(v => v.type === VEH.HELI);
+    // Render ground vehicles then air vehicles (layering)
+    var groundVehicles = [];
+    var airVehicles = [];
+    for (var vi = 0; vi < allVehicles.length; vi++) {
+      if (allVehicles[vi].type === VEH.HELI) airVehicles.push(allVehicles[vi]);
+      else groundVehicles.push(allVehicles[vi]);
+    }
+    for (var gi = 0; gi < groundVehicles.length; gi++) groundVehicles[gi].render(ctx, camX, camY);
+    for (var ai = 0; ai < airVehicles.length; ai++) airVehicles[ai].render(ctx, camX, camY);
 
-    groundVehicles.forEach(v => v.render(ctx, camX, camY));
-    airVehicles.forEach(v => v.render(ctx, camX, camY));
-
-    // Particles (on top of everything)
     Game.Particles.render(ctx, camX, camY);
 
     ctx.restore();
 
-    // HUD
-    Game.UI.renderHUD(playerVehicle, score, flags, gameTime, jeepLives);
+    // HUD (with round indicator)
+    Game.UI.renderHUD(playerVehicle, score, flags, gameTime, jeepLives, currentRound, roundsWon);
 
     // Minimap
-    const mmW = 180, mmH = 120;
-    const mmX = screenW - mmW - 10, mmY = screenH - mmH - 10;
-    const entityList = allVehicles.filter(v => v.alive);
-    const flagList = [
+    var mmW = 180, mmH = 120;
+    var mmX = screenW - mmW - 10, mmY = screenH - mmH - 10;
+    var entityList = [];
+    for (var el = 0; el < allVehicles.length; el++) {
+      if (allVehicles[el].alive) entityList.push(allVehicles[el]);
+    }
+    var flagList = [
       { x: flags[1].x, y: flags[1].y, team: 1 },
       { x: flags[2].x, y: flags[2].y, team: 2 }
     ];
     map.renderMinimap(ctx, mmX, mmY, mmW, mmH, entityList, flagList);
 
-    // Player position on minimap
     if (playerVehicle && playerVehicle.alive) {
-      const scaleX = mmW / map.width;
-      const scaleY = mmH / map.height;
-      const px = mmX + (playerVehicle.x / TILE) * scaleX;
-      const py = mmY + (playerVehicle.y / TILE) * scaleY;
+      var scaleX = mmW / map.width;
+      var scaleY = mmH / map.height;
+      var px = mmX + (playerVehicle.x / TILE) * scaleX;
+      var py = mmY + (playerVehicle.y / TILE) * scaleY;
       ctx.fillStyle = '#fff';
       ctx.fillRect(px - 2, py - 2, 4, 4);
     }
 
-    // Respawn overlay
     if (isRespawning) {
       Game.UI.renderRespawn(respawnTimer);
     }
 
-    // Touch controls
     Game.UI.renderTouchControls();
-
-    // Notifications
     Game.UI.renderNotifications();
   }
 
   /* ========== START ========== */
-  // Wait for DOM
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
   }
 
-  // Expose for network
   window.Game.getState = function () {
-    return { state, score, flags, gameTime };
+    return { state: state, score: score, flags: flags, gameTime: gameTime, currentRound: currentRound, roundsWon: roundsWon };
   };
 })();

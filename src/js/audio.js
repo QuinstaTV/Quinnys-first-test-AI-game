@@ -277,7 +277,7 @@
         { type: 'snare', d: 0.5 }, { type: 'kick', d: 0.5 }
       ]
     },
-    // Helicopter: Action movie helicopter theme, driving 80s rock
+    // UrbanStrike: Action movie helicopter theme, driving 80s rock
     [Game.VEH.HELI]: {
       tempo: 140,
       notes: [

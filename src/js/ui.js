@@ -109,11 +109,11 @@
   function renderVehicleSelect(currentType, vehiclePool, jeepLives) {
     const pool = vehiclePool || [true, true, true, true];
     const jLives = jeepLives !== undefined ? jeepLives : 3;
-    const vehicleNames = ['JEEP', 'BUSHMASTER', 'HELICOPTER', 'STRIKEMASTER'];
+    const vehicleNames = ['JEEP', 'BUSHMASTER', 'URBANSTRIKE', 'STRIKEMASTER'];
     const vehicleDescs = [
       'Speed: ████░  HP: ██░░░\nGun: Machine Gun\n★ Only flag carrier!\n★ Can cross water briefly',
       'Speed: ██░░░  HP: ████░\nGun: 360° Auto-Aim Cannon\n★ Turret auto-tracks enemies\n★ Heavy armor',
-      'Speed: ████░  HP: ██░░░\nGun: Strafe Guns\n★ Flies over terrain\n★ Detects mines',
+      'Speed: ████░  HP: ██░░░\nGun: Strafe Guns\n★ Flies over terrain\n★ Detects mines (UrbanStrike)',
       'Speed: █░░░░  HP: █████\nGun: Rockets\n★ Lays mines\n★ Heavily armored'
     ];
 
@@ -454,7 +454,7 @@
       '║  • Vehicles have limited fuel & ammo     ║',
       '║  • Return to base or depots to resupply  ║',
       '║  • Destroy walls to create new paths     ║',
-      '║  • Helicopter flies over everything      ║',
+      '║  • UrbanStrike flies over everything     ║',
       '║  • StrikeMaster can lay mines behind it  ║',
       '║  • BushMaster turret auto-aims enemies   ║',
       '║  • Jeep has 3 respawn lives per round    ║',
@@ -472,7 +472,7 @@
   }
 
   /* ========== HUD (In-Game) ========== */
-  function renderHUD(player, score, flags, gameTime, jeepLives) {
+  function renderHUD(player, score, flags, gameTime, jeepLives, currentRound, roundsWon) {
     if (!player) return;
 
     const pad = 10;
@@ -527,10 +527,22 @@
     ctx.fillStyle = '#ff7777';
     ctx.fillText('RED', screenW / 2 + 50, 28);
 
-    // Win target
-    ctx.fillStyle = '#666';
-    ctx.font = '10px monospace';
-    ctx.fillText('First to 3', screenW / 2, 42);
+    // Round indicator
+    if (currentRound) {
+      ctx.fillStyle = '#ff9900';
+      ctx.font = 'bold 12px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('ROUND ' + currentRound + '/10', screenW / 2, 42);
+      if (roundsWon) {
+        ctx.fillStyle = '#888';
+        ctx.font = '10px monospace';
+        ctx.fillText('Won: ' + (roundsWon.team1 || 0) + ' - ' + (roundsWon.team2 || 0), screenW / 2, 56);
+      }
+    } else {
+      ctx.fillStyle = '#666';
+      ctx.font = '10px monospace';
+      ctx.fillText('First to 3', screenW / 2, 42);
+    }
 
     // Timer
     if (gameTime !== undefined) {
@@ -617,6 +629,196 @@
     ctx.font = '9px monospace';
     ctx.textAlign = 'left';
     ctx.fillText(label, x + 3, y + h - 3);
+  }
+
+  /* ========== ROUND STATS SCREEN ========== */
+  function renderRoundStats(roundWinner, score, roundStats, currentRound, roundsWon, timer) {
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillRect(0, 0, screenW, screenH);
+
+    var cx = screenW / 2;
+    var topY = 60;
+
+    // Title
+    ctx.fillStyle = '#ff9900';
+    ctx.font = 'bold 32px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('ROUND ' + currentRound + ' COMPLETE', cx, topY);
+
+    // Round winner
+    var isBlue = roundWinner === 1;
+    ctx.fillStyle = isBlue ? '#3388ff' : '#ff4444';
+    ctx.font = 'bold 22px monospace';
+    ctx.fillText((isBlue ? 'BLUE' : 'RED') + ' WINS THE ROUND!', cx, topY + 40);
+
+    // Flag score this round
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText(score.team1 + ' - ' + score.team2, cx, topY + 70);
+
+    // Stats table
+    var tableY = topY + 110;
+    var colW = 160;
+    var headers = ['', 'BLUE', 'RED', 'YOU'];
+    var rows = [
+      ['Kills', roundStats.team1.kills, roundStats.team2.kills, roundStats.player.kills],
+      ['Deaths', roundStats.team1.deaths, roundStats.team2.deaths, roundStats.player.deaths],
+      ['Flags', roundStats.team1.flags, roundStats.team2.flags, roundStats.player.flags],
+      ['Turrets', roundStats.team1.turretsKilled, roundStats.team2.turretsKilled, roundStats.player.turretsKilled]
+    ];
+
+    // Header row
+    ctx.font = 'bold 14px monospace';
+    for (var h = 0; h < headers.length; h++) {
+      ctx.fillStyle = h === 1 ? '#66aaff' : h === 2 ? '#ff7777' : h === 3 ? '#ffcc00' : '#aaa';
+      ctx.textAlign = h === 0 ? 'right' : 'center';
+      ctx.fillText(headers[h], cx - 240 + h * colW, tableY);
+    }
+
+    // Data rows
+    ctx.font = '14px monospace';
+    for (var r = 0; r < rows.length; r++) {
+      var rowY = tableY + 28 + r * 26;
+      for (var c = 0; c < rows[r].length; c++) {
+        ctx.fillStyle = c === 0 ? '#aaa' : c === 1 ? '#88bbff' : c === 2 ? '#ff9999' : '#ffdd66';
+        ctx.textAlign = c === 0 ? 'right' : 'center';
+        ctx.fillText('' + rows[r][c], cx - 240 + c * colW, rowY);
+      }
+    }
+
+    // Overall series score
+    ctx.fillStyle = '#ff9900';
+    ctx.font = 'bold 16px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('SERIES: ' + (roundsWon.team1 || 0) + ' - ' + (roundsWon.team2 || 0), cx, tableY + 160);
+
+    // Timer / skip prompt
+    ctx.fillStyle = '#888';
+    ctx.font = '13px monospace';
+    var remaining = Math.max(0, Math.ceil(timer));
+    var pulse = Math.sin(Date.now() * 0.004) * 0.3 + 0.7;
+    ctx.globalAlpha = pulse;
+    ctx.fillText('Next round in ' + remaining + 's  (ENTER to skip)', cx, screenH - 40);
+    ctx.globalAlpha = 1;
+  }
+
+  /* ========== FINAL STATS SCREEN ========== */
+  function renderFinalStats(winner, roundsWon, allRoundStats, maxRounds) {
+    ctx.fillStyle = '#0a0a1a';
+    ctx.fillRect(0, 0, screenW, screenH);
+
+    var cx = screenW / 2;
+    var topY = 50;
+
+    // Title
+    var isBlue = winner === 1;
+    ctx.fillStyle = isBlue ? '#3388ff' : '#ff4444';
+    ctx.font = 'bold 36px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText((isBlue ? 'BLUE' : 'RED') + ' WINS THE GAME!', cx, topY);
+
+    // Series result
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px monospace';
+    ctx.fillText('Rounds Won: ' + (roundsWon.team1 || 0) + ' - ' + (roundsWon.team2 || 0), cx, topY + 45);
+
+    // Aggregate stats from all rounds
+    var totals = {
+      player: { kills: 0, deaths: 0, flags: 0, turretsKilled: 0 },
+      team1: { kills: 0, deaths: 0, flags: 0, turretsKilled: 0 },
+      team2: { kills: 0, deaths: 0, flags: 0, turretsKilled: 0 },
+      totalTime: 0
+    };
+    for (var i = 0; i < allRoundStats.length; i++) {
+      var rs = allRoundStats[i];
+      totals.player.kills += rs.player.kills;
+      totals.player.deaths += rs.player.deaths;
+      totals.player.flags += rs.player.flags;
+      totals.player.turretsKilled += rs.player.turretsKilled;
+      totals.team1.kills += rs.team1.kills;
+      totals.team1.deaths += rs.team1.deaths;
+      totals.team1.flags += rs.team1.flags;
+      totals.team1.turretsKilled += rs.team1.turretsKilled;
+      totals.team2.kills += rs.team2.kills;
+      totals.team2.deaths += rs.team2.deaths;
+      totals.team2.flags += rs.team2.flags;
+      totals.team2.turretsKilled += rs.team2.turretsKilled;
+      totals.totalTime += rs.time;
+    }
+
+    // Total time
+    var tm = Math.floor(totals.totalTime / 60);
+    var ts = Math.floor(totals.totalTime % 60);
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px monospace';
+    ctx.fillText('Total Play Time: ' + tm + ':' + (ts < 10 ? '0' : '') + ts, cx, topY + 75);
+
+    // Stats table
+    var tableY = topY + 110;
+    var colW = 160;
+    var headers = ['', 'BLUE', 'RED', 'YOU'];
+    var rows = [
+      ['Kills', totals.team1.kills, totals.team2.kills, totals.player.kills],
+      ['Deaths', totals.team1.deaths, totals.team2.deaths, totals.player.deaths],
+      ['Flags', totals.team1.flags, totals.team2.flags, totals.player.flags],
+      ['Turrets', totals.team1.turretsKilled, totals.team2.turretsKilled, totals.player.turretsKilled]
+    ];
+
+    ctx.font = 'bold 14px monospace';
+    for (var h = 0; h < headers.length; h++) {
+      ctx.fillStyle = h === 1 ? '#66aaff' : h === 2 ? '#ff7777' : h === 3 ? '#ffcc00' : '#aaa';
+      ctx.textAlign = h === 0 ? 'right' : 'center';
+      ctx.fillText(headers[h], cx - 240 + h * colW, tableY);
+    }
+
+    ctx.font = '14px monospace';
+    for (var r = 0; r < rows.length; r++) {
+      var rowY = tableY + 28 + r * 26;
+      for (var c = 0; c < rows[r].length; c++) {
+        ctx.fillStyle = c === 0 ? '#aaa' : c === 1 ? '#88bbff' : c === 2 ? '#ff9999' : '#ffdd66';
+        ctx.textAlign = c === 0 ? 'right' : 'center';
+        ctx.fillText('' + rows[r][c], cx - 240 + c * colW, rowY);
+      }
+    }
+
+    // Per-round mini results
+    var prY = tableY + 160;
+    ctx.fillStyle = '#999';
+    ctx.font = 'bold 13px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('ROUND RESULTS', cx, prY);
+    ctx.font = '12px monospace';
+    for (var ri = 0; ri < allRoundStats.length; ri++) {
+      var rr = allRoundStats[ri];
+      var rrY = prY + 22 + ri * 20;
+      var winColor = rr.winner === 1 ? '#66aaff' : '#ff7777';
+      var winLabel = rr.winner === 1 ? 'Blue' : 'Red';
+      ctx.fillStyle = winColor;
+      ctx.fillText('R' + rr.round + ': ' + winLabel + ' wins  (' + rr.score.team1 + '-' + rr.score.team2 + ')', cx, rrY);
+    }
+
+    // MVP (player K/D ratio)
+    var kd = totals.player.deaths > 0 ? (totals.player.kills / totals.player.deaths).toFixed(1) : totals.player.kills + '.0';
+    var mvpY = prY + 30 + allRoundStats.length * 20 + 20;
+    ctx.fillStyle = '#ffcc00';
+    ctx.font = 'bold 14px monospace';
+    ctx.fillText('YOUR K/D: ' + kd + '  |  FLAGS: ' + totals.player.flags + '  |  TURRETS: ' + totals.player.turretsKilled, cx, mvpY);
+
+    // Prompt
+    ctx.fillStyle = '#888';
+    ctx.font = '13px monospace';
+    var pulse = Math.sin(Date.now() * 0.004) * 0.3 + 0.7;
+    ctx.globalAlpha = pulse;
+    ctx.fillText('Press ENTER to play again  |  ESC for menu', cx, screenH - 30);
+    ctx.globalAlpha = 1;
+
+    // Skull decorations
+    var skull = Game.Sprites.sprites.skull;
+    if (skull) {
+      var bounce = Math.sin(Date.now() * 0.005) * 8;
+      ctx.drawImage(skull, cx - 300 + bounce, topY - 20, 40, 40);
+      ctx.drawImage(skull, cx + 260 - bounce, topY - 20, 40, 40);
+    }
   }
 
   /* ========== GAME OVER ========== */
@@ -802,6 +1004,7 @@
     init, resize,
     renderMenu, renderVehicleSelect, renderLobby, renderHowToPlay,
     renderHUD, renderGameOver, renderRespawn,
+    renderRoundStats, renderFinalStats,
     renderTouchControls, renderNotifications,
     notify, updateNotifications, updateMouse,
     getMenuClick, getVehicleClick, getLobbyAction,

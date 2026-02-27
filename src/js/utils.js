@@ -32,7 +32,9 @@
     VEHICLE_SELECT: 1,
     PLAYING: 2,
     GAME_OVER: 3,
-    LOBBY: 4
+    LOBBY: 4,
+    ROUND_STATS: 5,
+    FINAL_STATS: 6
   };
 
   // Team colours

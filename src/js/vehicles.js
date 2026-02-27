@@ -1,5 +1,5 @@
 /* ============================================================
-   vehicles.js - Jeep, BushMaster, Helicopter, StrikeMaster
+   vehicles.js - Jeep, BushMaster, UrbanStrike, StrikeMaster
    with full stats, weapons, fuel/ammo, flag carrying, specials
    ============================================================ */
 (function () {
@@ -20,7 +20,7 @@
       projType: 'SHELL', hitRadius: 16, canCarryFlag: false
     },
     [VEH.HELI]: {
-      name: 'Helicopter', speed: 200, turnRate: 4.0, hp: 70,
+      name: 'UrbanStrike', speed: 200, turnRate: 4.0, hp: 70,
       fuel: 180, fuelBurn: 6, ammo: 120, fireRate: 0.12,
       projType: 'BULLET', hitRadius: 14, canCarryFlag: false, flies: true
     },

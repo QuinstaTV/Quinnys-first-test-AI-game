@@ -23,7 +23,10 @@
       }
 
       socket = io(serverUrl || window.location.origin, {
-        transports: ['websocket', 'polling']
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
       });
 
       socket.on('connect', () => {
@@ -95,10 +98,10 @@
         if (callbacks.onError) callbacks.onError(data);
       });
 
-      // Timeout
+      // Timeout - generous for Render cold starts (~30-90s)
       setTimeout(() => {
         if (!connected) reject(new Error('Connection timeout'));
-      }, 5000);
+      }, 15000);
     });
   }
 

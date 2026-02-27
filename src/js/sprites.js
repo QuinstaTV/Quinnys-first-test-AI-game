@@ -416,7 +416,7 @@
     const types = [
       { name: 'JEEP', desc: 'Fast / Flag carrier', col: '#4a4' },
       { name: 'BUSHMASTER', desc: '360° cannon / Tough', col: '#a84' },
-      { name: 'HELICOPTER', desc: 'Flies / Fragile', col: '#48a' },
+      { name: 'URBANSTRIKE', desc: 'Flies / Fragile', col: '#48a' },
       { name: 'STRIKEMASTER', desc: 'Rockets / Mines', col: '#a44' }
     ];
     sprites.vehicleCards = [];

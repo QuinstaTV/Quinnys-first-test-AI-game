@@ -12,12 +12,18 @@
   <div id="loading">
     <div class="loader-text">DAMAGED TERRITORY</div>
     <div class="loader-sub">Loading...</div>
+    <div class="loader-hint" id="coldStartHint" style="display:none;">Free server waking up — this can take 30–90 seconds on first visit. Hang tight!</div>
   </div>
 
-  <!-- Socket.io client (CDN) - for multiplayer -->
-  <script src="https://cdn.socket.io/4.7.4/socket.io.min.js" 
-          crossorigin="anonymous"
-          onerror="console.log('Socket.io CDN unavailable - multiplayer will use fallback')">
+  <!-- Socket.io client (served by own server, falls back to CDN) -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    if (typeof io === 'undefined') {
+      var s = document.createElement('script');
+      s.src = 'https://cdn.socket.io/4.7.4/socket.io.min.js';
+      s.crossOrigin = 'anonymous';
+      document.head.appendChild(s);
+    }
   </script>
 
   <!-- Game scripts (loaded in dependency order) -->
@@ -35,10 +41,15 @@
   <script src="js/game.js"></script>
 
   <script>
-    // Hide loader once game initializes
+    // Hide loader once game initializes; show cold-start hint after 3s
     window.addEventListener('load', () => {
+      var hintTimer = setTimeout(() => {
+        var hint = document.getElementById('coldStartHint');
+        if (hint) hint.style.display = 'block';
+      }, 3000);
       setTimeout(() => {
-        const loader = document.getElementById('loading');
+        clearTimeout(hintTimer);
+        var loader = document.getElementById('loading');
         if (loader) loader.style.display = 'none';
       }, 500);
     });
