@@ -14,6 +14,8 @@ A top-down vehicular **Capture the Flag** shooter inspired by the classic **Retu
 Steal the enemy team's flag and return it to your base. **First to 3 captures wins the round!** Play **10 rounds** — most round wins takes the game.
 
 ### Controls
+
+#### Desktop
 | Key | Action |
 |-----|--------|
 | WASD / Arrow Keys | Move vehicle |
@@ -22,6 +24,19 @@ Steal the enemy team's flag and return it to your base. **First to 3 captures wi
 | M | Toggle music |
 | ESC | Pause / Menu |
 | 1-4 | Select vehicle type |
+
+#### Mobile / Touch
+| Control | Action |
+|---------|--------|
+| Left joystick | Move vehicle |
+| Right joystick | Aim + fire |
+| FIRE button | Shoot |
+| AUTO toggle | Auto-fire on/off |
+| MINE/SWAP button | Lay mine (ASV) / Swap vehicle |
+| ⏸ button | Pause menu |
+| Tap vehicle bay | Deploy vehicle |
+
+> **Tip:** Play in landscape mode for the best experience. A fullscreen button (⛶) appears on touch devices.
 
 ### Vehicles
 
@@ -85,14 +100,15 @@ The game is deployed as a free-tier Web Service on Render:
 │   ├── setup.js          # Browser mock setup
 │   ├── utils.test.js     # Constants & math helper tests
 │   ├── map.test.js       # Map generation tests
-│   └── vehicles.test.js  # Vehicle stat & lifecycle tests
+│   ├── vehicles.test.js  # Vehicle stat & lifecycle tests
+│   └── mobile.test.js    # Mobile/touch input & haptic tests
 └── src/
     ├── index.html        # Game entry point
     ├── css/
     │   └── style.css     # Game styling
     └── js/
         ├── utils.js      # Constants, math helpers, A* pathfinding
-        ├── input.js      # Keyboard, mouse, touch input
+        ├── input.js      # Hybrid keyboard/mouse/touch input with virtual joysticks
         ├── sprites.js    # Procedural sprite generation (zero assets!)
         ├── map.js        # Procedural island map generator
         ├── particles.js  # Particle effects (explosions, smoke)
@@ -117,6 +133,7 @@ npm test
 # - utils.js: constants, math helpers, geometry, tile functions
 # - map.js: seeded generation, determinism, escalation, spawn positions
 # - vehicles.js: stats, creation, damage, death, respawn, flag carrying
+# - mobile.js: device detection, touch input, joysticks, haptics, fullscreen
 ```
 
 ---
@@ -159,8 +176,8 @@ Each vehicle has a unique classical-inspired music theme generated in real-time 
 - ✅ Minimap with real-time tracking
 - ✅ Laughing skull death animation
 - ✅ Classical music themes per vehicle
-- ✅ Touch controls for mobile
-- ✅ **44 unit tests** via Jest (`npm test`)
+- ✅ Touch controls for mobile (dual joysticks, haptics, fullscreen)
+- ✅ **68 unit tests** via Jest (`npm test`)
 - ✅ Zero external assets — everything generated in code
 - ✅ MIT License — completely free
 

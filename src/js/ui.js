@@ -87,8 +87,12 @@
     ctx.fillStyle = '#444';
     ctx.font = '11px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('v1.1 - Inspired by Return Fire (1995) - MIT License', screenW / 2, screenH - 30);
-    ctx.fillText('WASD/Arrows to move | Space/Click to shoot | 1-4 select vehicle', screenW / 2, screenH - 14);
+    ctx.fillText('v1.4 - Inspired by Return Fire (1995) - MIT License', screenW / 2, screenH - 30);
+    if (Game.Input.isTouch) {
+      ctx.fillText('Tap to select  |  Touch controls in-game', screenW / 2, screenH - 14);
+    } else {
+      ctx.fillText('WASD/Arrows to move | Space/Click to shoot | 1-4 select vehicle', screenW / 2, screenH - 14);
+    }
   }
 
   /* ========== VEHICLE SELECT ========== */
@@ -157,7 +161,11 @@
     ctx.font = 'bold 14px monospace';
     const pulse = Math.sin(Date.now() * 0.004) * 0.3 + 0.7;
     ctx.globalAlpha = pulse;
-    ctx.fillText('Press ENTER/CLICK to deploy  |  A/D or ←/→ to browse', screenW / 2, descY + 10 + lines.length * 18 + 20);
+    if (Game.Input.isTouch) {
+      ctx.fillText('Tap a vehicle bay to deploy  |  Swipe to browse', screenW / 2, descY + 10 + lines.length * 18 + 20);
+    } else {
+      ctx.fillText('Press ENTER/CLICK to deploy  |  A/D or ←/→ to browse', screenW / 2, descY + 10 + lines.length * 18 + 20);
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -434,35 +442,67 @@
     ctx.textAlign = 'center';
     ctx.fillText('HOW TO PLAY', screenW / 2, 50);
 
-    const lines = [
-      '',
-      '╔══════════════════════════════════════════╗',
-      '║  OBJECTIVE: Capture the enemy flag and   ║',
-      '║  return it to your base. First to 3 wins!║',
-      '╠══════════════════════════════════════════╣',
-      '║                                          ║',
-      '║  CONTROLS:                               ║',
-      '║  WASD / Arrow Keys ... Move vehicle      ║',
-      '║  Mouse / Space ....... Shoot             ║',
-      '║  E ........... Lay mine (StrikeMaster)   ║',
-      '║  R ................... Swap vehicle       ║',
-      '║  M ................... Toggle music       ║',
-      '║  ESC ................. Pause / Menu       ║',
-      '║                                          ║',
-      '║  TIPS:                                   ║',
-      '║  • Only JEEP can carry the flag!         ║',
-      '║  • Vehicles have limited fuel & ammo     ║',
-      '║  • Return to base or depots to resupply  ║',
-      '║  • Destroy walls to create new paths     ║',
-      '║  • UrbanStrike flies over everything     ║',
-      '║  • StrikeMaster can lay mines behind it  ║',
-      '║  • BushMaster turret auto-aims enemies   ║',
-      '║  • Jeep has 3 respawn lives per round    ║',
-      '║                                          ║',
-      '╚══════════════════════════════════════════╝',
-      '',
-      'Press any key to return to menu'
-    ];
+    var lines;
+    if (Game.Input.isTouch) {
+      lines = [
+        '',
+        '╔══════════════════════════════════════════╗',
+        '║  OBJECTIVE: Capture the enemy flag and   ║',
+        '║  return it to your base. First to 3 wins!║',
+        '╠══════════════════════════════════════════╣',
+        '║                                          ║',
+        '║  TOUCH CONTROLS:                         ║',
+        '║  Left joystick ....... Move vehicle      ║',
+        '║  Right joystick ...... Aim & fire        ║',
+        '║  FIRE button ......... Shoot             ║',
+        '║  AUTO button ......... Toggle auto-fire  ║',
+        '║  MINE/SWAP button .... Special action    ║',
+        '║  ⏸ button ............ Pause menu        ║',
+        '║                                          ║',
+        '║  TIPS:                                   ║',
+        '║  • Only JEEP can carry the flag!         ║',
+        '║  • Vehicles have limited fuel & ammo     ║',
+        '║  • Return to base or depots to resupply  ║',
+        '║  • Destroy walls to create new paths     ║',
+        '║  • UrbanStrike flies over everything     ║',
+        '║  • Tap a vehicle bay to deploy           ║',
+        '║  • Play in landscape mode!               ║',
+        '║                                          ║',
+        '╚══════════════════════════════════════════╝',
+        '',
+        'Tap anywhere to return to menu'
+      ];
+    } else {
+      lines = [
+        '',
+        '╔══════════════════════════════════════════╗',
+        '║  OBJECTIVE: Capture the enemy flag and   ║',
+        '║  return it to your base. First to 3 wins!║',
+        '╠══════════════════════════════════════════╣',
+        '║                                          ║',
+        '║  CONTROLS:                               ║',
+        '║  WASD / Arrow Keys ... Move vehicle      ║',
+        '║  Mouse / Space ....... Shoot             ║',
+        '║  E ........... Lay mine (StrikeMaster)   ║',
+        '║  R ................... Swap vehicle       ║',
+        '║  M ................... Toggle music       ║',
+        '║  ESC ................. Pause / Menu       ║',
+        '║                                          ║',
+        '║  TIPS:                                   ║',
+        '║  • Only JEEP can carry the flag!         ║',
+        '║  • Vehicles have limited fuel & ammo     ║',
+        '║  • Return to base or depots to resupply  ║',
+        '║  • Destroy walls to create new paths     ║',
+        '║  • UrbanStrike flies over everything     ║',
+        '║  • StrikeMaster can lay mines behind it  ║',
+        '║  • BushMaster turret auto-aims enemies   ║',
+        '║  • Jeep has 3 respawn lives per round    ║',
+        '║                                          ║',
+        '╚══════════════════════════════════════════╝',
+        '',
+        'Press any key to return to menu'
+      ];
+    }
 
     ctx.fillStyle = '#ccc';
     ctx.font = '13px monospace';
@@ -611,7 +651,11 @@
       ctx.textAlign = 'center';
       const pulse = Math.sin(Date.now() * 0.005) * 0.3 + 0.7;
       ctx.globalAlpha = pulse;
-      ctx.fillText('Press [R] to return to base & swap vehicle', screenW / 2, screenH - 55);
+      if (Game.Input.isTouch) {
+        ctx.fillText('Tap SWAP to return to base & swap vehicle', screenW / 2, screenH - 55);
+      } else {
+        ctx.fillText('Press [R] to return to base & swap vehicle', screenW / 2, screenH - 55);
+      }
       ctx.globalAlpha = 1;
     }
   }
@@ -698,7 +742,11 @@
     var remaining = Math.max(0, Math.ceil(timer));
     var pulse = Math.sin(Date.now() * 0.004) * 0.3 + 0.7;
     ctx.globalAlpha = pulse;
-    ctx.fillText('Next round in ' + remaining + 's  (ENTER to skip)', cx, screenH - 40);
+    if (Game.Input.isTouch) {
+      ctx.fillText('Next round in ' + remaining + 's  (tap to skip)', cx, screenH - 40);
+    } else {
+      ctx.fillText('Next round in ' + remaining + 's  (ENTER to skip)', cx, screenH - 40);
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -809,7 +857,11 @@
     ctx.font = '13px monospace';
     var pulse = Math.sin(Date.now() * 0.004) * 0.3 + 0.7;
     ctx.globalAlpha = pulse;
-    ctx.fillText('Press ENTER to play again  |  ESC for menu', cx, screenH - 30);
+    if (Game.Input.isTouch) {
+      ctx.fillText('Tap to play again', cx, screenH - 30);
+    } else {
+      ctx.fillText('Press ENTER to play again  |  ESC for menu', cx, screenH - 30);
+    }
     ctx.globalAlpha = 1;
 
     // Skull decorations
@@ -840,7 +892,11 @@
     ctx.font = '16px monospace';
     const pulse = Math.sin(Date.now() * 0.004) * 0.3 + 0.7;
     ctx.globalAlpha = pulse;
-    ctx.fillText('Press ENTER to play again or ESC for menu', screenW / 2, screenH / 2 + 60);
+    if (Game.Input.isTouch) {
+      ctx.fillText('Tap to play again', screenW / 2, screenH / 2 + 60);
+    } else {
+      ctx.fillText('Press ENTER to play again or ESC for menu', screenW / 2, screenH / 2 + 60);
+    }
     ctx.globalAlpha = 1;
 
     // Laughing skull!
@@ -875,40 +931,149 @@
     ctx.fillText(`Respawning in ${Math.ceil(timer)}...`, screenW / 2, screenH / 2 + 50);
   }
 
-  /* ========== TOUCH JOYSTICK ========== */
-  function renderTouchControls() {
-    if (!Game.Input.touchActive && !('ontouchstart' in window)) return;
+  /* ========== TOUCH JOYSTICK & HUD CONTROLS ========== */
+  function renderTouchControls(playerVehicle) {
+    if (!Game.Input.isTouch && !Game.Input.touchActive) return;
 
-    const input = Game.Input;
+    var input = Game.Input;
+    var pad = 20;
+    var safeBottom = 30; // safe-area bottom inset
 
-    // Left joystick area
+    // Clear previous touch buttons
+    input.clearTouchButtons();
+
+    // ===== Left movement joystick =====
+    var ljCx = pad + 70;
+    var ljCy = screenH - safeBottom - 80;
+    var ljOuterR = 55;
+    var ljInnerR = 22;
+
+    // Outer ring
     ctx.strokeStyle = 'rgba(255,255,255,0.2)';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(80, screenH - 100, 50, 0, Math.PI * 2);
+    ctx.arc(ljCx, ljCy, ljOuterR, 0, Math.PI * 2);
     ctx.stroke();
 
-    if (input.joystickActive) {
+    // Inner thumb
+    var mjDx = Game.clamp(input.moveJoystick.dx, -ljOuterR, ljOuterR);
+    var mjDy = Game.clamp(input.moveJoystick.dy, -ljOuterR, ljOuterR);
+    ctx.fillStyle = input.moveJoystick.active ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.15)';
+    ctx.beginPath();
+    ctx.arc(ljCx + mjDx, ljCy + mjDy, ljInnerR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Label
+    if (!input.moveJoystick.active) {
       ctx.fillStyle = 'rgba(255,255,255,0.3)';
-      ctx.beginPath();
-      const jx = Game.clamp(input.joystickDX, -40, 40);
-      const jy = Game.clamp(input.joystickDY, -40, 40);
-      ctx.arc(80 + jx, screenH - 100 + jy, 20, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('MOVE', ljCx, ljCy + 4);
     }
 
-    // Right side - fire button
-    ctx.strokeStyle = 'rgba(255,100,0,0.3)';
+    // ===== Right aim joystick =====
+    var rjCx = screenW - pad - 70;
+    var rjCy = screenH - safeBottom - 80;
+    var rjOuterR = 45;
+    var rjInnerR = 18;
+
+    // Outer ring
+    ctx.strokeStyle = 'rgba(255,100,0,0.25)';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(screenW - 80, screenH - 100, 40, 0, Math.PI * 2);
+    ctx.arc(rjCx, rjCy, rjOuterR, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.fillStyle = 'rgba(255,100,0,0.15)';
+
+    // Inner thumb
+    var ajDx = Game.clamp(input.aimJoystick.dx, -rjOuterR, rjOuterR);
+    var ajDy = Game.clamp(input.aimJoystick.dy, -rjOuterR, rjOuterR);
+    ctx.fillStyle = input.aimJoystick.active ? 'rgba(255,100,0,0.4)' : 'rgba(255,100,0,0.15)';
+    ctx.beginPath();
+    ctx.arc(rjCx + ajDx, rjCy + ajDy, rjInnerR, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = 'rgba(255,100,0,0.5)';
+
+    // Label
+    ctx.fillStyle = 'rgba(255,100,0,0.4)';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'center';
+    if (!input.aimJoystick.active) {
+      ctx.fillText('AIM', rjCx, rjCy + 4);
+    }
+
+    // ===== Fire button =====
+    var fireX = screenW - pad - 165;
+    var fireY = screenH - safeBottom - 65;
+    var fireR = 30;
+    var firing = input.fireTouch.active || input.isShooting();
+
+    ctx.strokeStyle = firing ? 'rgba(255,100,0,0.7)' : 'rgba(255,100,0,0.3)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(fireX, fireY, fireR, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = firing ? 'rgba(255,100,0,0.3)' : 'rgba(255,100,0,0.1)';
+    ctx.fill();
+    ctx.fillStyle = firing ? 'rgba(255,150,50,0.9)' : 'rgba(255,100,0,0.6)';
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('FIRE', fireX, fireY + 4);
+
+    input.registerTouchButton({ id: 'fire', x: fireX - fireR, y: fireY - fireR, w: fireR * 2, h: fireR * 2, action: 'fire' });
+
+    // ===== Auto-fire toggle =====
+    var afX = fireX;
+    var afY = fireY - 70;
+    var afW = 50, afH = 24;
+    ctx.fillStyle = input.autoFire ? 'rgba(255,100,0,0.3)' : 'rgba(255,255,255,0.05)';
+    ctx.fillRect(afX - afW / 2, afY - afH / 2, afW, afH);
+    ctx.strokeStyle = input.autoFire ? '#ff6600' : 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(afX - afW / 2, afY - afH / 2, afW, afH);
+    ctx.fillStyle = input.autoFire ? '#ff6600' : 'rgba(255,255,255,0.4)';
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('AUTO', afX, afY + 3);
+
+    input.registerTouchButton({ id: 'autofire', x: afX - afW / 2, y: afY - afH / 2, w: afW, h: afH, action: 'autofire' });
+
+    // ===== Special action button (mine/swap) =====
+    if (playerVehicle && playerVehicle.alive) {
+      var spX = screenW - pad - 60;
+      var spY = screenH - safeBottom - 160;
+      var spW = 52, spH = 32;
+      var isASV = playerVehicle.type === Game.VEH.ASV;
+      var spLabel = isASV ? 'MINE' : 'SWAP';
+      var spAction = isASV ? 'special' : 'swap';
+
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      ctx.fillRect(spX - spW / 2, spY - spH / 2, spW, spH);
+      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(spX - spW / 2, spY - spH / 2, spW, spH);
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(spLabel, spX, spY + 3);
+
+      input.registerTouchButton({ id: 'special', x: spX - spW / 2, y: spY - spH / 2, w: spW, h: spH, action: spAction });
+    }
+
+    // ===== Pause button (top-right) =====
+    var pX = screenW - 50;
+    var pY = 14;
+    var pW = 40, pH = 28;
+
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.fillRect(pX, pY, pW, pH);
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(pX, pY, pW, pH);
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
     ctx.font = '12px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('FIRE', screenW - 80, screenH - 96);
+    ctx.fillText('⏸', pX + pW / 2, pY + pH / 2 + 4);
+
+    input.registerTouchButton({ id: 'pause', x: pX, y: pY, w: pW, h: pH, action: 'pause' });
   }
 
   /* ========== Notification System ========== */
@@ -1000,12 +1165,87 @@
     return null;
   }
 
+  /* ========== Pause/Exit Overlay (mobile) ========== */
+  var pauseOverlayVisible = false;
+
+  function showPauseOverlay() { pauseOverlayVisible = true; }
+  function hidePauseOverlay() { pauseOverlayVisible = false; }
+  function isPauseOverlayVisible() { return pauseOverlayVisible; }
+
+  function renderPauseOverlay() {
+    if (!pauseOverlayVisible) return;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, 0, screenW, screenH);
+
+    var cx = screenW / 2;
+    var cy = screenH / 2;
+
+    ctx.fillStyle = '#ff6600';
+    ctx.font = 'bold 28px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('PAUSED', cx, cy - 80);
+
+    // Resume button
+    var btnW = 200, btnH = 50;
+    var resumeY = cy - 30;
+    var hover1 = isMouseInRect(cx - btnW / 2, resumeY, btnW, btnH);
+    ctx.fillStyle = hover1 ? '#ff6600' : 'rgba(255,102,0,0.3)';
+    ctx.fillRect(cx - btnW / 2, resumeY, btnW, btnH);
+    ctx.strokeStyle = '#ff6600';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(cx - btnW / 2, resumeY, btnW, btnH);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText('RESUME', cx, resumeY + 32);
+
+    // Quit button
+    var quitY = resumeY + 70;
+    var hover2 = isMouseInRect(cx - btnW / 2, quitY, btnW, btnH);
+    ctx.fillStyle = hover2 ? '#cc2222' : 'rgba(200,30,30,0.3)';
+    ctx.fillRect(cx - btnW / 2, quitY, btnW, btnH);
+    ctx.strokeStyle = '#cc2222';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(cx - btnW / 2, quitY, btnW, btnH);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText('QUIT TO MENU', cx, quitY + 32);
+
+    // Toggle music button
+    var musicY = quitY + 70;
+    var hover3 = isMouseInRect(cx - btnW / 2, musicY, btnW, btnH);
+    ctx.fillStyle = hover3 ? '#336699' : 'rgba(50,100,150,0.3)';
+    ctx.fillRect(cx - btnW / 2, musicY, btnW, btnH);
+    ctx.strokeStyle = '#336699';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx - btnW / 2, musicY, btnW, btnH);
+    ctx.fillStyle = '#ccc';
+    ctx.font = '14px monospace';
+    ctx.fillText('TOGGLE MUSIC', cx, musicY + 32);
+  }
+
+  function getPauseOverlayClick() {
+    updateMouse();
+    var cx = screenW / 2;
+    var cy = screenH / 2;
+    var btnW = 200, btnH = 50;
+    var resumeY = cy - 30;
+    var quitY = resumeY + 70;
+    var musicY = quitY + 70;
+    if (isMouseInRect(cx - btnW / 2, resumeY, btnW, btnH)) return 'resume';
+    if (isMouseInRect(cx - btnW / 2, quitY, btnW, btnH)) return 'quit';
+    if (isMouseInRect(cx - btnW / 2, musicY, btnW, btnH)) return 'music';
+    return null;
+  }
+
   window.Game.UI = {
     init, resize,
     renderMenu, renderVehicleSelect, renderLobby, renderHowToPlay,
     renderHUD, renderGameOver, renderRespawn,
     renderRoundStats, renderFinalStats,
     renderTouchControls, renderNotifications,
+    renderPauseOverlay, showPauseOverlay, hidePauseOverlay, isPauseOverlayVisible,
+    getPauseOverlayClick,
     notify, updateNotifications, updateMouse,
     getMenuClick, getVehicleClick, getLobbyAction,
     startElevatorDeploy,

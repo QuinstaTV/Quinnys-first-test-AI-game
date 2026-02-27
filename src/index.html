@@ -2,13 +2,23 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#0a0a1a">
   <title>Damaged Territory - Capture the Flag</title>
   <link rel="stylesheet" href="css/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚩</text></svg>">
 </head>
 <body>
   <canvas id="gameCanvas"></canvas>
+  <button id="fullscreenBtn" aria-label="Toggle fullscreen">⛶</button>
+  <div id="orientationPrompt">
+    <div class="rotate-icon">📱</div>
+    <div class="rotate-text">Rotate to Landscape</div>
+    <div class="rotate-sub">This game plays best in landscape mode</div>
+  </div>
   <div id="loading">
     <div class="loader-text">DAMAGED TERRITORY</div>
     <div class="loader-sub">Loading...</div>

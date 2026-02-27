@@ -1,5 +1,66 @@
 # CHANGELOG — Damaged Territory
 
+## v1.4.0 — Mobile Touch Optimization
+
+### Hybrid Input System (input.js rewrite)
+- **Device detection**: Auto-detects touch/coarse-pointer devices via `ontouchstart`, `maxTouchPoints`, and `matchMedia('pointer:coarse')`
+- **Dual virtual joysticks**: Left joystick (movement, 60px radius) + right joystick (aim & fire, 50px radius)
+- **Multi-touch**: Each finger tracked by `touch.identifier` — move, aim, and fire simultaneously
+- **Tap-to-shoot**: Tap right side or dedicated fire button to shoot
+- **Auto-fire toggle**: Persistent auto-fire mode for sustained combat
+- **Touch button system**: Registrable UI buttons (fire, special/mine, swap vehicle, pause) with zones
+- **Legacy compatibility**: `joystickActive`, `joystickDX/DY` still work from old API
+
+### Haptic Feedback
+- `navigator.vibrate()` on shoot (30ms), mine lay (60ms), hit taken (40ms)
+- Kill feedback pattern: [50, 30, 100]ms
+- Death feedback pattern: [100, 50, 200]ms
+- Flag capture celebration pattern: [50, 30, 50, 30, 150]ms
+
+### Fullscreen & Orientation
+- Fullscreen toggle button (⛶) shown only on touch devices via `@media (pointer: coarse)`
+- `document.requestFullscreen()` with webkit fallback
+- `screen.orientation.lock('landscape')` on fullscreen entry
+- Portrait orientation prompt overlay with rotate animation
+- CSS `@media (pointer: coarse) and (orientation: portrait)` detection
+
+### Responsive Canvas Scaling
+- `devicePixelRatio`-aware rendering (capped at 2× for performance)
+- `ctx.setTransform(dpr, ...)` — draw in CSS pixels, render at native resolution
+- `imageSmoothingEnabled = false` for crisp pixel art
+- Debounced resize (100ms) + `orientationchange` handler (200ms delay)
+- Mobile screens use actual dimensions (no 800×500 minimum)
+
+### Pause Overlay (Mobile)
+- ⏸ button in HUD (top-right) opens pause overlay
+- Double-tap detection also triggers pause
+- Overlay: Resume / Quit to Menu / Toggle Music buttons
+- Game input frozen while paused
+
+### Touch-Friendly UI
+- Menu: "Tap to select" prompt on touch devices
+- Vehicle select: "Tap a vehicle bay to deploy" prompt
+- How To Play: Separate touch controls reference on mobile
+- Stats screens: "Tap to continue/skip" prompts
+- Vehicle swap: SWAP button in HUD (replaces [R] key)
+- All touch targets ≥ 48px minimum
+
+### CSS & HTML
+- Viewport: `maximum-scale=1.0, viewport-fit=cover`
+- Apple/Android web-app-capable meta tags
+- `touch-action: none` on canvas and body
+- `-webkit-tap-highlight-color: transparent`
+- `overscroll-behavior: none`, `position: fixed` on body
+- `env(safe-area-inset-*)` padding on loading screen
+- Theme color meta: `#0a0a1a`
+
+### Tests
+- **24 new mobile tests** in `tests/mobile.test.js` (68 total)
+- Tests cover: device detection, touch listeners, joystick state, auto-fire, haptics, fullscreen, touch buttons, pause, legacy compat
+- Test setup updated: `devicePixelRatio`, `matchMedia`, `navigator.vibrate`, `fullscreenElement`, `setTransform` mocks
+
+---
+
 ## v1.3.0 — Render.com Deployment (Online Multiplayer)
 
 ### Render Free-Tier Deployment

@@ -104,7 +104,14 @@
     ctx = canvas.getContext('2d');
 
     resizeCanvas();
-    window.addEventListener('resize', resizeCanvas);
+    var resizeTimer = null;
+    window.addEventListener('resize', function () {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(resizeCanvas, 100);
+    });
+    window.addEventListener('orientationchange', function () {
+      setTimeout(resizeCanvas, 200);
+    });
 
     Game.Input.init(canvas);
     Game.Sprites.generate();
@@ -119,16 +126,53 @@
     // Canvas click handler for menus
     canvas.addEventListener('click', handleClick);
 
+    // Fullscreen button
+    var fsBtn = document.getElementById('fullscreenBtn');
+    if (fsBtn) {
+      fsBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        Game.Input.toggleFullscreen();
+      });
+    }
+
     // Start loop
     requestAnimationFrame(gameLoop);
   }
 
   function resizeCanvas() {
-    screenW = Math.max(800, window.innerWidth);
-    screenH = Math.max(500, window.innerHeight);
-    canvas.width = screenW;
-    canvas.height = screenH;
+    var dpr = window.devicePixelRatio || 1;
+    // Cap DPR at 2 for performance on high-DPI devices
+    dpr = Math.min(dpr, 2);
+
+    var cssW = window.innerWidth;
+    var cssH = window.innerHeight;
+
+    // Minimum logical size
+    screenW = Math.max(800, cssW);
+    screenH = Math.max(500, cssH);
+
+    // On small touch screens, use actual dimensions (no minimum)
+    if (Game.Input && Game.Input.isTouch && cssW < 800) {
+      screenW = cssW;
+      screenH = cssH;
+    }
+
+    // Set canvas backing resolution (crisp rendering)
+    canvas.width = Math.round(screenW * dpr);
+    canvas.height = Math.round(screenH * dpr);
+
+    // CSS display size
+    canvas.style.width = screenW + 'px';
+    canvas.style.height = screenH + 'px';
+
+    // Scale context so drawing commands use CSS pixels
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+
     Game.UI.resize(screenW, screenH);
+    Game.dpr = dpr;
+    Game.screenW = screenW;
+    Game.screenH = screenH;
   }
 
   /* ========== GAME LOOP ========== */
@@ -179,6 +223,7 @@
       if (Game.Input.wasPressed('Escape') || Game.Input.wasPressed('Enter') ||
           Game.Input.wasPressed('Space') || Game.Input.wasClicked()) {
         showingHowToPlay = false;
+        Game.Input.haptic(20);
       }
       return;
     }
@@ -460,7 +505,7 @@
 
   function updateRoundStats(dt) {
     statsTimer -= dt;
-    if (statsTimer <= 0 || Game.Input.wasPressed('Enter') || Game.Input.wasPressed('Space')) {
+    if (statsTimer <= 0 || Game.Input.wasPressed('Enter') || Game.Input.wasPressed('Space') || Game.Input.wasClicked()) {
       // Check if game is over
       const gameOver = currentRound >= MAX_ROUNDS ||
                        roundsWon.team1 > MAX_ROUNDS / 2 ||
@@ -482,7 +527,7 @@
   }
 
   function updateFinalStats(dt) {
-    if (Game.Input.wasPressed('Enter') || Game.Input.wasPressed('Space')) {
+    if (Game.Input.wasPressed('Enter') || Game.Input.wasPressed('Space') || Game.Input.wasClicked()) {
       map = null;
       state = STATE.VEHICLE_SELECT;
       vehiclePool = [true, true, true, true];
@@ -499,11 +544,35 @@
     if (!map) return;
     gameTime += dt;
 
-    // Pause
-    if (Game.Input.wasPressed('Escape')) {
+    // Pause (keyboard + touch)
+    if (Game.Input.wasPressed('Escape') || Game.Input.isPauseRequested()) {
+      if (Game.Input.isTouch) {
+        // On mobile, show pause overlay instead of going to menu
+        Game.UI.showPauseOverlay();
+        return;
+      }
       state = STATE.MENU;
       Game.Audio.stopMusic();
       return;
+    }
+
+    // Pause overlay handling (mobile)
+    if (Game.UI.isPauseOverlayVisible()) {
+      if (Game.Input.wasClicked()) {
+        var pauseAction = Game.UI.getPauseOverlayClick();
+        if (pauseAction === 'resume') {
+          Game.UI.hidePauseOverlay();
+        } else if (pauseAction === 'quit') {
+          Game.UI.hidePauseOverlay();
+          state = STATE.MENU;
+          Game.Audio.stopMusic();
+        } else if (pauseAction === 'music') {
+          var on = Game.Audio.toggleMusic();
+          Game.UI.notify(on ? 'Music ON' : 'Music OFF', '#aaa', 1.5);
+          if (on && playerVehicle) Game.Audio.playMusic(playerVehicle.type);
+        }
+      }
+      return; // Don't process game input while paused
     }
 
     // Toggle music
@@ -589,9 +658,10 @@
         playerVehicle.shoot();
       }
 
-      // Mine laying (ASV)
-      if (Game.Input.wasPressed('KeyE') && playerVehicle.type === VEH.ASV) {
+      // Mine laying (ASV) - keyboard or touch special button
+      if ((Game.Input.wasPressed('KeyE') || Game.Input.isSpecialPressed()) && playerVehicle.type === VEH.ASV) {
         playerVehicle.layMine();
+        Game.Input.haptic(60);
       }
 
       // Return to base (R key)
@@ -730,10 +800,15 @@
       }
       if (killer && killer.isPlayer) {
         Game.UI.notify('Enemy destroyed!', '#ff6600', 2);
+        Game.Input.hapticPattern([50, 30, 100]); // kill haptic
       }
       if (vehicle.isPlayer) {
         Game.UI.notify('You were destroyed!', '#ff4444', 2);
+        Game.Input.hapticPattern([100, 50, 200]); // death haptic
       }
+    } else if (vehicle.isPlayer) {
+      // Player got hit but survived
+      Game.Input.haptic(40);
     }
   }
 
@@ -855,6 +930,7 @@
               recordFlag(f.carrier.team, f.carrier.isPlayer);
 
               Game.Audio.play('score');
+              if (f.carrier.isPlayer) Game.Input.hapticPattern([50, 30, 50, 30, 150]);
               Game.UI.notify(
                 (f.carrier.team === 1 ? 'Blue' : 'Red') + ' team SCORES!',
                 f.carrier.team === 1 ? '#3388ff' : '#ff4444', 3
@@ -1194,8 +1270,13 @@
       Game.UI.renderRespawn(respawnTimer);
     }
 
-    Game.UI.renderTouchControls();
+    Game.UI.renderTouchControls(playerVehicle);
     Game.UI.renderNotifications();
+
+    // Pause overlay (on top of everything)
+    if (Game.UI.isPauseOverlayVisible()) {
+      Game.UI.renderPauseOverlay();
+    }
   }
 
   /* ========== START ========== */

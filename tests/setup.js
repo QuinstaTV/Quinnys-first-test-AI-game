@@ -35,6 +35,8 @@ const mockCtx = {
   globalAlpha: 1,
   fillText: jest.fn(),
   strokeText: jest.fn(),
+  setTransform: jest.fn(),
+  imageSmoothingEnabled: true,
 };
 
 const mockCanvas = {
@@ -43,6 +45,7 @@ const mockCanvas = {
   height: 640,
   addEventListener: jest.fn(),
   toDataURL: jest.fn(),
+  getBoundingClientRect: jest.fn(() => ({ left: 0, top: 0, width: 960, height: 640 })),
   style: {},
 };
 
@@ -62,6 +65,12 @@ global.document = {
   }),
   readyState: 'complete',
   addEventListener: jest.fn(),
+  fullscreenElement: null,
+  webkitFullscreenElement: null,
+  exitFullscreen: jest.fn(),
+  documentElement: {
+    requestFullscreen: jest.fn(() => Promise.resolve()),
+  },
 };
 
 // Mock window
@@ -69,8 +78,16 @@ global.window = global.window || {};
 global.window.addEventListener = jest.fn();
 global.window.innerWidth = 960;
 global.window.innerHeight = 640;
+global.window.devicePixelRatio = 1;
+global.window.matchMedia = jest.fn(() => ({ matches: false, addEventListener: jest.fn() }));
 global.requestAnimationFrame = jest.fn();
 global.setTimeout = global.setTimeout;
+global.navigator = global.navigator || {};
+global.navigator.vibrate = jest.fn(() => true);
+global.navigator.maxTouchPoints = 0;
+global.navigator.userAgent = global.navigator.userAgent || 'node-test';
+global.screen = global.screen || {};
+global.screen.orientation = { lock: jest.fn(() => Promise.resolve()), type: 'landscape-primary' };
 
 // Mock Audio API
 global.AudioContext = jest.fn(() => ({
