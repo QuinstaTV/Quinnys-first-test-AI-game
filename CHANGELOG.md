@@ -1,5 +1,74 @@
 # CHANGELOG — Damaged Territory
 
+## v1.5.0 — Army Overhaul, Enhanced Lobby & Multi-Island Maps
+
+### New Features
+
+#### Army-Themed UI Overhaul (ui.js rewrite)
+- **Camo background**: Procedural camouflage pattern with ellipse blobs and grid overlay on all menu screens
+- **Military colour palette**: Dark olive (#1a1f14) base, olive greens, orange (#ff6600) accents, stencil-style typography
+- **4-item main menu**: Single Player, Multiplayer, Settings, How to Play — with chevron decorations
+- **Credits footer**: "Created by Quinsta & QuinstaJr" on the main menu
+- **Back buttons**: Every sub-screen (vehicle select, lobby, settings, how-to-play) has a top-left ← BACK button
+
+#### Settings & Username System
+- **Settings screen** (new game state `STATE.SETTINGS = 7`): Edit username with keyboard input or mobile prompt
+- **localStorage persistence**: Username saved to `dt_username`, loaded on game start
+- **Username labels**: `renderUsernameLabel()` draws name tags above vehicles in-game
+
+#### Enhanced Multiplayer Lobby
+- **Room browser + in-room lobby**: Two-panel flow — browse/create rooms, then manage inside room
+- **Ready / Unready toggle**: Players toggle readiness; all must be ready before host can start
+- **10-second countdown**: Host starts countdown, auto-launches game; any unready cancels it
+- **Team switching**: Players swap between Team A / Team B (max 4 per team)
+- **AI slots**: Host can add AI players to either team (auto-ready, capped at 4/team)
+- **8-player 4v4**: `maxPlayers` raised to 8; lobby shows full player list with team/ready state
+- **No AI in multiplayer games**: `startMultiplayerGame()` no longer spawns AI bots
+
+#### Multi-Island Maps (map.js rewrite)
+- **2–4 islands per map**: Normal rounds get 2–3 islands, epic rounds get 2–4
+- **Island layout configs**: Predefined position/size arrays for 2, 3, and 4 island arrangements
+- **Bridge connections**: `buildBridge()` uses quadratic Bézier curves through random midpoints; 3-tile-wide paths with BRIDGE tiles over water and ROAD on sand
+- **Per-island features**: Water channels, ponds, and road networks generated within each island
+- **Bases on endpoints**: Flags placed on the first and last islands
+
+### Bug Fixes
+- **Respawn after death**: Death detection moved outside the `if (playerVehicle.alive)` block so external kills are properly detected; `RESPAWN_TIME` set to 3.0 seconds
+- **Double-tap opens pause on mobile**: Removed double-tap detection from `onTouchStart()`; dedicated pause button remains
+- **Desktop view scaling**: Added `Game.uiScale` computed relative to 1920×1080 (desktop) / 960×540 (mobile) in `resizeCanvas()`; all UI rendering scales correctly
+
+### Server Enhancements (server.js)
+- Room class: `addAI(team)`, `switchTeam(socketId)`, `toggleReady(socketId)`
+- Countdown system: `startCountdown(io)` / `stopCountdown()` with 10-second timer
+- `broadcastLobbyUpdate(io)` sends full player list to all room members
+- `getPlayerList()` returns player info with name, team, ready state, isAI flag
+- Socket handlers: `toggleReady`, `switchTeam`, `addAI`, `cancelCountdown`
+- `createRoom` / `joinRoom` now accept and store username
+- `leaveCurrentRoom` broadcasts lobby update to remaining players
+
+### Network Client (network.js rewrite)
+- New state: `inRoom` flag, `lobbyData` object (players, countdown, hostId, roomName)
+- New methods: `toggleReady()`, `switchTeam()`, `addAI(team)`, `cancelCountdown()`
+- New events: `lobbyUpdate` syncs lobby state, `countdown` updates timer
+- `createRoom` / `joinRoom` accept username parameter
+
+### Tests
+- 33 new tests in `tests/v150-features.test.js` (118 total, 6 suites)
+  - Multi-island map generation (7 tests)
+  - Game state constants (3 tests)
+  - UI module exports (7 tests)
+  - Username system (3 tests)
+  - Menu system (2 tests)
+  - Lobby data handling (2 tests)
+  - Server room class (1 test)
+  - Desktop uiScale (3 tests)
+  - Respawn timer (1 test)
+  - Bridge connectivity (1 test)
+  - Settings / username persistence (2 tests)
+  - Credits rendering (1 test)
+
+---
+
 ## v1.4.1 — Mobile & Layout Bug Fixes
 
 ### Bug Fixes

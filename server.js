@@ -37,20 +37,24 @@ app.get('/', (req, res) => {
 const rooms = new Map();      // roomId -> Room
 const players = new Map();    // socketId -> Player
 
+let nextAIId = 1;
+
 class Room {
   constructor(id, name, hostId) {
     this.id = id;
     this.name = name;
     this.hostId = hostId;
-    this.players = new Map(); // socketId -> { team, vehicleType, ready }
-    this.maxPlayers = 4;
+    this.players = new Map(); // socketId -> { team, vehicleType, ready, name, isAI }
+    this.maxPlayers = 8; // 4v4
     this.state = 'waiting'; // 'waiting', 'playing', 'finished'
     this.scores = { team1: 0, team2: 0 };
     this.mapSeed = Math.floor(Math.random() * 999999);
     this.createdAt = Date.now();
+    this.countdownTimer = null;
+    this.countdown = 0;
   }
 
-  addPlayer(socketId) {
+  addPlayer(socketId, username) {
     if (this.players.size >= this.maxPlayers) return null;
     
     // Assign team (balance teams)
@@ -61,20 +65,114 @@ class Room {
     });
     const team = team1Count <= team2Count ? 1 : 2;
     
-    const playerData = { team, vehicleType: 0, ready: false };
+    const playerData = { team, vehicleType: 0, ready: false, name: username || 'Player', isAI: false };
     this.players.set(socketId, playerData);
     return playerData;
+  }
+
+  addAI(team) {
+    // Count players on this team
+    let teamCount = 0;
+    this.players.forEach(p => { if (p.team === team) teamCount++; });
+    if (teamCount >= 4) return null; // max 4 per team
+    if (this.players.size >= this.maxPlayers) return null;
+
+    const aiId = 'ai_' + (nextAIId++);
+    const playerData = { team, vehicleType: Math.floor(Math.random() * 4), ready: true, name: 'AI Bot', isAI: true };
+    this.players.set(aiId, playerData);
+    return { id: aiId, data: playerData };
   }
 
   removePlayer(socketId) {
     this.players.delete(socketId);
     if (this.hostId === socketId) {
-      // Transfer host
-      const firstPlayer = this.players.keys().next();
-      if (!firstPlayer.done) {
-        this.hostId = firstPlayer.value;
+      // Transfer host to first non-AI player
+      for (const [id, p] of this.players) {
+        if (!p.isAI) {
+          this.hostId = id;
+          break;
+        }
       }
     }
+    // Stop countdown if running
+    this.stopCountdown();
+  }
+
+  switchTeam(socketId) {
+    const p = this.players.get(socketId);
+    if (!p) return;
+    const targetTeam = p.team === 1 ? 2 : 1;
+    // Check if target team has room (max 4)
+    let targetCount = 0;
+    this.players.forEach(pl => { if (pl.team === targetTeam) targetCount++; });
+    if (targetCount >= 4) return false;
+    p.team = targetTeam;
+    p.ready = false; // switching unreadies
+    this.stopCountdown();
+    return true;
+  }
+
+  toggleReady(socketId) {
+    const p = this.players.get(socketId);
+    if (!p || p.isAI) return;
+    p.ready = !p.ready;
+    // If anyone unreadies, stop countdown
+    if (!p.ready) this.stopCountdown();
+  }
+
+  allReady() {
+    for (const [, p] of this.players) {
+      if (!p.isAI && !p.ready) return false;
+    }
+    return this.players.size >= 1; // at least 1 player
+  }
+
+  startCountdown(io) {
+    if (this.countdownTimer) return;
+    this.countdown = 10;
+    this.broadcastLobbyUpdate(io);
+    this.countdownTimer = setInterval(() => {
+      this.countdown--;
+      if (this.countdown <= 0) {
+        clearInterval(this.countdownTimer);
+        this.countdownTimer = null;
+        // Start the game
+        this.state = 'playing';
+        io.to(this.id).emit('gameStart', {
+          mapSeed: this.mapSeed,
+          players: this.getPlayerList()
+        });
+      } else {
+        io.to(this.id).emit('countdown', { value: this.countdown });
+      }
+    }, 1000);
+  }
+
+  stopCountdown() {
+    if (this.countdownTimer) {
+      clearInterval(this.countdownTimer);
+      this.countdownTimer = null;
+      this.countdown = 0;
+      // Unready all non-AI players
+      for (const [, p] of this.players) {
+        if (!p.isAI) p.ready = false;
+      }
+    }
+  }
+
+  getPlayerList() {
+    return Array.from(this.players.entries()).map(([id, p]) => ({
+      id, team: p.team, vehicleType: p.vehicleType, ready: p.ready, name: p.name, isAI: p.isAI
+    }));
+  }
+
+  broadcastLobbyUpdate(io) {
+    io.to(this.id).emit('lobbyUpdate', {
+      players: this.getPlayerList(),
+      countdown: this.countdown,
+      hostId: this.hostId,
+      roomName: this.name
+    });
   }
 
   serialize() {
@@ -108,8 +206,9 @@ io.on('connection', (socket) => {
   socket.on('createRoom', (data) => {
     const roomId = 'room_' + Date.now().toString(36);
     const name = (data && data.name) || 'Game Room';
+    const username = (data && data.username) || 'Player';
     const room = new Room(roomId, name, socket.id);
-    const playerData = room.addPlayer(socket.id);
+    const playerData = room.addPlayer(socket.id, username);
     rooms.set(roomId, room);
     
     const player = players.get(socket.id);
@@ -119,8 +218,10 @@ io.on('connection', (socket) => {
     socket.emit('roomJoined', {
       roomId,
       team: playerData.team,
-      isHost: true
+      isHost: true,
+      roomName: name
     });
+    room.broadcastLobbyUpdate(io);
 
     console.log(`Room created: ${roomId} by ${socket.id}`);
     broadcastRoomList();
@@ -138,7 +239,8 @@ io.on('connection', (socket) => {
       return;
     }
     
-    const playerData = room.addPlayer(socket.id);
+    const username = (data && data.username) || 'Player';
+    const playerData = room.addPlayer(socket.id, username);
     if (!playerData) {
       socket.emit('error', { message: 'Room is full' });
       return;
@@ -151,15 +253,12 @@ io.on('connection', (socket) => {
     socket.emit('roomJoined', {
       roomId: data.roomId,
       team: playerData.team,
-      isHost: room.hostId === socket.id
+      isHost: room.hostId === socket.id,
+      roomName: room.name
     });
 
-    // Notify others
-    socket.to(data.roomId).emit('roomUpdate', {
-      players: Array.from(room.players.entries()).map(([id, p]) => ({
-        id, team: p.team, vehicleType: p.vehicleType
-      }))
-    });
+    // Broadcast updated lobby to all in room
+    room.broadcastLobbyUpdate(io);
 
     console.log(`Player ${socket.id} joined room ${data.roomId} as team ${playerData.team}`);
     broadcastRoomList();
@@ -185,22 +284,59 @@ io.on('connection', (socket) => {
     if (!player || !player.roomId) return;
     const room = rooms.get(player.roomId);
     if (!room || room.hostId !== socket.id) return;
-    if (room.players.size < 2) {
-      socket.emit('error', { message: 'Need at least 2 players' });
+    if (!room.allReady()) {
+      socket.emit('error', { message: 'Not all players are ready' });
       return;
     }
 
-    room.state = 'playing';
-    
-    // Send game start to all players in room
-    io.to(player.roomId).emit('gameStart', {
-      mapSeed: room.mapSeed,
-      players: Array.from(room.players.entries()).map(([id, p]) => ({
-        id, team: p.team, vehicleType: p.vehicleType
-      }))
-    });
+    // Start 10 second countdown
+    room.startCountdown(io);
+    console.log(`Countdown started in room ${player.roomId}`);
+  });
 
-    console.log(`Game started in room ${player.roomId}`);
+  socket.on('cancelCountdown', () => {
+    const player = players.get(socket.id);
+    if (!player || !player.roomId) return;
+    const room = rooms.get(player.roomId);
+    if (!room || room.hostId !== socket.id) return;
+    room.stopCountdown();
+    room.broadcastLobbyUpdate(io);
+    console.log(`Countdown cancelled in room ${player.roomId}`);
+  });
+
+  socket.on('toggleReady', () => {
+    const player = players.get(socket.id);
+    if (!player || !player.roomId) return;
+    const room = rooms.get(player.roomId);
+    if (!room) return;
+    room.toggleReady(socket.id);
+    room.broadcastLobbyUpdate(io);
+  });
+
+  socket.on('switchTeam', () => {
+    const player = players.get(socket.id);
+    if (!player || !player.roomId) return;
+    const room = rooms.get(player.roomId);
+    if (!room) return;
+    if (room.switchTeam(socket.id)) {
+      room.broadcastLobbyUpdate(io);
+    } else {
+      socket.emit('error', { message: 'Target team is full (max 4)' });
+    }
+  });
+
+  socket.on('addAI', (data) => {
+    const player = players.get(socket.id);
+    if (!player || !player.roomId) return;
+    const room = rooms.get(player.roomId);
+    if (!room) return;
+    const team = data && data.team ? data.team : 1;
+    const result = room.addAI(team);
+    if (result) {
+      room.broadcastLobbyUpdate(io);
+    } else {
+      socket.emit('error', { message: 'Cannot add AI (team full or room full)' });
+    }
   });
 
   /* --- In-Game Sync --- */
@@ -257,18 +393,22 @@ function leaveCurrentRoom(socket) {
   if (!player || !player.roomId) return;
 
   const room = rooms.get(player.roomId);
+  const roomId = player.roomId;
   if (room) {
     room.removePlayer(socket.id);
-    socket.to(player.roomId).emit('playerLeft', { playerId: socket.id });
+    socket.to(roomId).emit('playerLeft', { playerId: socket.id });
 
     // Remove empty rooms
     if (room.players.size === 0) {
-      rooms.delete(player.roomId);
-      console.log(`Room ${player.roomId} deleted (empty)`);
+      rooms.delete(roomId);
+      console.log(`Room ${roomId} deleted (empty)`);
+    } else {
+      // Broadcast updated lobby to remaining players
+      room.broadcastLobbyUpdate(io);
     }
   }
 
-  socket.leave(player.roomId);
+  socket.leave(roomId);
   player.roomId = null;
   broadcastRoomList();
 }

@@ -1,6 +1,7 @@
 /* ============================================================
    network.js - Socket.io multiplayer client
    Handles lobby, game sync, disconnection
+   Enhanced: ready/unready, team switching, AI slots, countdown
    ============================================================ */
 (function () {
   'use strict';
@@ -11,7 +12,14 @@
   let playerId = null;
   let playerTeam = 0;
   let isHost = false;
+  let inRoom = false;
   let lobby = { rooms: [], players: [] };
+  let lobbyData = {
+    players: [],
+    countdown: 0,
+    hostId: null,
+    roomName: ''
+  };
   let callbacks = {};
 
   function connect(serverUrl) {
@@ -39,6 +47,7 @@
       socket.on('disconnect', () => {
         connected = false;
         roomId = null;
+        inRoom = false;
         if (callbacks.onDisconnect) callbacks.onDisconnect();
       });
 
@@ -48,16 +57,39 @@
       });
 
       // Lobby events
-      socket.on('roomList', (rooms) => {
-        lobby.rooms = rooms;
-        if (callbacks.onRoomList) callbacks.onRoomList(rooms);
+      socket.on('roomList', (rooms_) => {
+        lobby.rooms = rooms_;
+        if (callbacks.onRoomList) callbacks.onRoomList(rooms_);
       });
 
       socket.on('roomJoined', (data) => {
         roomId = data.roomId;
         playerTeam = data.team;
         isHost = data.isHost;
+        inRoom = true;
+        lobbyData.roomName = data.roomName || '';
         if (callbacks.onRoomJoined) callbacks.onRoomJoined(data);
+      });
+
+      socket.on('lobbyUpdate', (data) => {
+        lobbyData.players = data.players || [];
+        lobbyData.countdown = data.countdown || 0;
+        lobbyData.hostId = data.hostId;
+        lobbyData.roomName = data.roomName || lobbyData.roomName;
+        isHost = (data.hostId === playerId);
+        // Update our team from player list
+        for (let i = 0; i < lobbyData.players.length; i++) {
+          if (lobbyData.players[i].id === playerId) {
+            playerTeam = lobbyData.players[i].team;
+            break;
+          }
+        }
+        if (callbacks.onLobbyUpdate) callbacks.onLobbyUpdate(data);
+      });
+
+      socket.on('countdown', (data) => {
+        lobbyData.countdown = data.value;
+        if (callbacks.onCountdown) callbacks.onCountdown(data);
       });
 
       socket.on('roomUpdate', (data) => {
@@ -65,6 +97,7 @@
       });
 
       socket.on('gameStart', (data) => {
+        inRoom = false;
         if (callbacks.onGameStart) callbacks.onGameStart(data);
       });
 
@@ -112,23 +145,26 @@
     }
     connected = false;
     roomId = null;
+    inRoom = false;
   }
 
   /* ---------- Lobby actions ---------- */
-  function createRoom(name) {
+  function createRoom(name, username) {
     if (!connected) return;
-    socket.emit('createRoom', { name });
+    socket.emit('createRoom', { name, username: username || 'Player' });
   }
 
-  function joinRoom(id) {
+  function joinRoom(id, username) {
     if (!connected) return;
-    socket.emit('joinRoom', { roomId: id });
+    socket.emit('joinRoom', { roomId: id, username: username || 'Player' });
   }
 
   function leaveRoom() {
     if (!connected || !roomId) return;
     socket.emit('leaveRoom');
     roomId = null;
+    inRoom = false;
+    lobbyData = { players: [], countdown: 0, hostId: null, roomName: '' };
   }
 
   function requestRooms() {
@@ -139,6 +175,26 @@
   function startGame(vehicleType) {
     if (!connected || !roomId) return;
     socket.emit('startGame', { vehicleType });
+  }
+
+  function cancelCountdown() {
+    if (!connected || !roomId) return;
+    socket.emit('cancelCountdown');
+  }
+
+  function toggleReady() {
+    if (!connected || !roomId) return;
+    socket.emit('toggleReady');
+  }
+
+  function switchTeam() {
+    if (!connected || !roomId) return;
+    socket.emit('switchTeam');
+  }
+
+  function addAI(team) {
+    if (!connected || !roomId) return;
+    socket.emit('addAI', { team });
   }
 
   function selectVehicle(vehicleType) {
@@ -180,7 +236,8 @@
   window.Game.Network = {
     connect, disconnect,
     createRoom, joinRoom, leaveRoom, requestRooms,
-    startGame, selectVehicle,
+    startGame, cancelCountdown, toggleReady, switchTeam, addAI,
+    selectVehicle,
     sendState, sendAction, sendFlagEvent, sendTileDestroyed, sendChat,
     on,
     get connected() { return connected; },
@@ -188,6 +245,8 @@
     get playerId() { return playerId; },
     get playerTeam() { return playerTeam; },
     get isHost() { return isHost; },
-    get lobby() { return lobby; }
+    get inRoom() { return inRoom; },
+    get lobby() { return lobby; },
+    get lobbyData() { return lobbyData; }
   };
 })();

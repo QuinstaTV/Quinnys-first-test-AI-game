@@ -151,12 +151,7 @@
 
       var zoneInfo = getTouchZone(tx, ty, r.width, r.height);
 
-      // Double-tap detection for pause
-      var now = Date.now();
-      if (now - lastTapTime < 300) {
-        pauseRequested = true;
-      }
-      lastTapTime = now;
+      // NOTE: Double-tap pause removed — use the dedicated PAUSE button instead
 
       if (zoneInfo.zone === 'button') {
         // UI button touch

@@ -66,6 +66,7 @@
 
     /**
      * Generate map from seed + round number.
+     * Multi-island layout with wooden bridges connecting them.
      * @param {number} [seed]     - deterministic seed (for MP sync)
      * @param {number} [roundNum] - 1-10; round 10 is "Epic"
      */
@@ -92,84 +93,151 @@
         for (let x = 0; x < W; x++) this.tiles[y][x] = T.WATER;
       }
 
-      // Island shape with noise
-      const cx = W / 2, cy = H / 2;
-      const rx = W * 0.44, ry = H * 0.42;
-      for (let y = 0; y < H; y++) {
-        for (let x = 0; x < W; x++) {
-          const dx = (x - cx) / rx;
-          const dy = (y - cy) / ry;
-          const d = dx * dx + dy * dy;
-          const n = noise1(x / W, y / H) * 0.18 + noise2(x / W, y / H) * 0.1;
-          if (d + n - 0.05 < 0.85) {
-            this.tiles[y][x] = T.GRASS;
-          } else if (d + n < 1.0) {
-            this.tiles[y][x] = T.SAND;
+      // ---- Multi-island generation ----
+      // Generate 2-4 islands with varied shapes
+      const numIslands = 2 + Math.floor(rng() * (isEpic ? 3 : 2)); // 2-3 normal, 2-4 epic
+      const islands = [];
+
+      // Distribute island centers across the map
+      // Left island for team 1, right for team 2, extras in between
+      const islandConfigs = [];
+      if (numIslands === 2) {
+        islandConfigs.push({ cx: W * 0.26, cy: H * 0.5, rx: W * 0.22, ry: H * 0.38 });
+        islandConfigs.push({ cx: W * 0.74, cy: H * 0.5, rx: W * 0.22, ry: H * 0.38 });
+      } else if (numIslands === 3) {
+        islandConfigs.push({ cx: W * 0.20, cy: H * 0.5, rx: W * 0.17, ry: H * 0.36 });
+        islandConfigs.push({ cx: W * 0.50, cy: H * 0.5, rx: W * 0.16, ry: H * 0.32 });
+        islandConfigs.push({ cx: W * 0.80, cy: H * 0.5, rx: W * 0.17, ry: H * 0.36 });
+      } else {
+        islandConfigs.push({ cx: W * 0.18, cy: H * 0.5, rx: W * 0.15, ry: H * 0.34 });
+        islandConfigs.push({ cx: W * 0.40, cy: H * 0.35, rx: W * 0.13, ry: H * 0.26 });
+        islandConfigs.push({ cx: W * 0.60, cy: H * 0.65, rx: W * 0.13, ry: H * 0.26 });
+        islandConfigs.push({ cx: W * 0.82, cy: H * 0.5, rx: W * 0.15, ry: H * 0.34 });
+      }
+
+      // Add random offset to each island center
+      for (let i = 0; i < islandConfigs.length; i++) {
+        islandConfigs[i].cx += (rng() - 0.5) * 4;
+        islandConfigs[i].cy += (rng() - 0.5) * 4;
+      }
+
+      // Generate each island
+      for (let idx = 0; idx < numIslands; idx++) {
+        const cfg = islandConfigs[idx];
+        const icx = cfg.cx, icy = cfg.cy;
+        const irx = cfg.rx, iry = cfg.ry;
+
+        // Shape variation: elongation and rotation
+        const shapeVar = rng() * 0.3;
+        const islandNoise = makeNoise(rng, 8, 6);
+
+        for (let y = 0; y < H; y++) {
+          for (let x = 0; x < W; x++) {
+            const dx = (x - icx) / irx;
+            const dy = (y - icy) / iry;
+            const d = dx * dx + dy * dy;
+            const n = islandNoise(x / W, y / H) * 0.2 + noise1(x / W, y / H) * 0.1;
+            if (d + n + shapeVar < 0.85) {
+              if (this.tiles[y][x] === T.WATER) {
+                this.tiles[y][x] = T.GRASS;
+              }
+            } else if (d + n + shapeVar < 1.05) {
+              if (this.tiles[y][x] === T.WATER) {
+                this.tiles[y][x] = T.SAND;
+              }
+            }
           }
+        }
+
+        islands.push({ cx: Math.floor(icx), cy: Math.floor(icy), rx: irx, ry: iry });
+      }
+
+      // ---- Connect islands with wooden bridges ----
+      // Connect each pair of adjacent islands
+      for (let i = 0; i < islands.length - 1; i++) {
+        const a = islands[i];
+        const b = islands[i + 1];
+        this.buildBridge(a.cx, a.cy, b.cx, b.cy, rng);
+      }
+      // For 4 islands, also connect diagonal pairs
+      if (islands.length >= 4) {
+        this.buildBridge(islands[0].cx, islands[0].cy, islands[2].cx, islands[2].cy, rng);
+        this.buildBridge(islands[1].cx, islands[1].cy, islands[3].cx, islands[3].cy, rng);
+      }
+
+      // ---- Strategic water channels on larger islands ----
+      for (let idx = 0; idx < numIslands; idx++) {
+        var isl = islands[idx];
+        if (rng() < 0.5) {
+          const chOffX = Math.floor((rng() - 0.5) * 4);
+          const chLen = 3 + Math.floor(rng() * 4);
+          this.carveChannel(isl.cx + chOffX, isl.cy - chLen, isl.cx + chOffX, isl.cy + chLen, 1);
         }
       }
 
-      // ---- Strategic water channels (varied per seed) ----
-      const numChannels = 1 + Math.floor(rng() * 2); // 1-2
-      for (let c = 0; c < numChannels; c++) {
-        const chOffX = Math.floor((rng() - 0.5) * 6);
-        const chLen = 6 + Math.floor(rng() * 6);
-        this.carveChannel(cx + chOffX, cy - chLen, cx + chOffX, cy + chLen, 2);
-      }
       // Ponds
       const numPonds = 2 + Math.floor(rng() * 2);
       for (let p = 0; p < numPonds; p++) {
-        const px = cx + (rng() - 0.5) * W * 0.4;
-        const py = cy + (rng() - 0.5) * H * 0.4;
+        const islandIdx = Math.floor(rng() * numIslands);
+        const isl = islands[islandIdx];
+        const px = isl.cx + (rng() - 0.5) * isl.rx * 0.8;
+        const py = isl.cy + (rng() - 0.5) * isl.ry * 0.8;
         this.carvePond(px, py, 2 + Math.floor(rng() * 2));
       }
 
-      // ---- Bases ----
-      const baseY = Math.floor(cy) + Math.floor((rng() - 0.5) * 4);
-      const base1X = 5 + Math.floor(rng() * 3);
-      const base2X = W - 6 - Math.floor(rng() * 3);
+      // ---- Bases (on first and last islands) ----
+      const leftIsland = islands[0];
+      const rightIsland = islands[islands.length - 1];
+      const base1X = Math.floor(leftIsland.cx) + Math.floor((rng() - 0.5) * 3);
+      const base1Y = Math.floor(leftIsland.cy) + Math.floor((rng() - 0.5) * 3);
+      const base2X = Math.floor(rightIsland.cx) + Math.floor((rng() - 0.5) * 3);
+      const base2Y = Math.floor(rightIsland.cy) + Math.floor((rng() - 0.5) * 3);
 
-      // ---- Roads (3 horizontal lanes + verticals) ----
-      this.carveRoad(base1X, baseY, base2X, baseY); // main
-      const laneOff = 8 + Math.floor(rng() * 5);
-      this.carveRoad(base1X + 4, baseY - laneOff, base2X - 4, baseY - laneOff);
-      this.carveRoad(base1X + 4, baseY + laneOff, base2X - 4, baseY + laneOff);
-      // Verticals
-      this.carveRoad(base1X + 4, baseY, base1X + 4, baseY - laneOff);
-      this.carveRoad(base1X + 4, baseY, base1X + 4, baseY + laneOff);
-      this.carveRoad(base2X - 4, baseY, base2X - 4, baseY - laneOff);
-      this.carveRoad(base2X - 4, baseY, base2X - 4, baseY + laneOff);
-      this.carveRoad(Math.floor(cx), baseY - laneOff, Math.floor(cx), baseY + laneOff);
-
-      // Bridges
-      const bridgeCount = 3 + Math.floor(rng() * 3);
-      this.placeBridges(Math.floor(cx), baseY);
-      for (let b = 0; b < bridgeCount; b++) {
-        const bx = Math.floor(cx) + Math.floor((rng() - 0.5) * 10);
-        const by = baseY + Math.floor((rng() - 0.5) * laneOff * 2);
-        this.placeBridges(bx, by);
+      // ---- Roads (within each island and across bridges) ----
+      // Main horizontal road across the map
+      this.carveRoad(base1X, base1Y, base2X, base2Y);
+      // Roads within each island
+      for (let idx = 0; idx < numIslands; idx++) {
+        var isl2 = islands[idx];
+        const roadOffY = Math.floor(3 + rng() * 4);
+        this.carveRoad(
+          Math.floor(isl2.cx - isl2.rx * 0.5), Math.floor(isl2.cy - roadOffY),
+          Math.floor(isl2.cx + isl2.rx * 0.5), Math.floor(isl2.cy - roadOffY)
+        );
+        this.carveRoad(
+          Math.floor(isl2.cx - isl2.rx * 0.5), Math.floor(isl2.cy + roadOffY),
+          Math.floor(isl2.cx + isl2.rx * 0.5), Math.floor(isl2.cy + roadOffY)
+        );
+        // Vertical connector
+        this.carveRoad(
+          Math.floor(isl2.cx), Math.floor(isl2.cy - roadOffY),
+          Math.floor(isl2.cx), Math.floor(isl2.cy + roadOffY)
+        );
       }
 
       // ---- Base areas ----
-      this.placeBase(base1X, baseY, 1);
-      this.placeBase(base2X, baseY, 2);
-      this.team1Flag = { x: base1X + 2, y: baseY };
-      this.team2Flag = { x: base2X - 2, y: baseY };
+      this.clearArea(base1X - 1, base1Y - 2, 5, 5);
+      this.clearArea(base2X - 2, base2Y - 2, 5, 5);
+      this.placeBase(base1X, base1Y, 1);
+      this.placeBase(base2X, base2Y, 2);
+      this.team1Flag = { x: base1X + 2, y: base1Y };
+      this.team2Flag = { x: base2X - 2, y: base2Y };
 
-      // Epic: extra flag towers (decoy positions — actual game flag at normal spot)
+      // Epic: extra flag towers
       if (isEpic) {
-        // Place decoy wall-towers near flags
-        this.placeWallCluster(base1X + 3, baseY - 3, 2, 2);
-        this.placeWallCluster(base1X + 3, baseY + 2, 2, 2);
-        this.placeWallCluster(base2X - 4, baseY - 3, 2, 2);
-        this.placeWallCluster(base2X - 4, baseY + 2, 2, 2);
+        this.placeWallCluster(base1X + 3, base1Y - 3, 2, 2);
+        this.placeWallCluster(base1X + 3, base1Y + 2, 2, 2);
+        this.placeWallCluster(base2X - 4, base2Y - 3, 2, 2);
+        this.placeWallCluster(base2X - 4, base2Y + 2, 2, 2);
       }
 
-      // ---- Walls (varied) ----
-      const wallClusters = 4 + Math.floor(rng() * 3) + (isEpic ? 4 : 0);
+      // ---- Walls ----
+      const wallClusters = 3 + Math.floor(rng() * 3) + (isEpic ? 3 : 0);
       for (let w = 0; w < wallClusters; w++) {
-        const wx = Math.floor(cx + (rng() - 0.5) * W * 0.6);
-        const wy = Math.floor(cy + (rng() - 0.5) * H * 0.6);
+        const islandIdx = Math.floor(rng() * numIslands);
+        const isl3 = islands[islandIdx];
+        const wx = Math.floor(isl3.cx + (rng() - 0.5) * isl3.rx * 1.2);
+        const wy = Math.floor(isl3.cy + (rng() - 0.5) * isl3.ry * 1.2);
         const ww = 2 + Math.floor(rng() * 3);
         const wh = 2 + Math.floor(rng() * 4);
         this.placeWallCluster(wx, wy, ww, wh);
@@ -178,8 +246,10 @@
       // ---- Trees ----
       const treeClusters = 4 + Math.floor(rng() * 4) + (isEpic ? 3 : 0);
       for (let t = 0; t < treeClusters; t++) {
-        const tx = Math.floor(base1X + 8 + rng() * (base2X - base1X - 16));
-        const ty = Math.floor(cy + (rng() - 0.5) * H * 0.7);
+        const islandIdx = Math.floor(rng() * numIslands);
+        const isl4 = islands[islandIdx];
+        const tx = Math.floor(isl4.cx + (rng() - 0.5) * isl4.rx * 1.0);
+        const ty = Math.floor(isl4.cy + (rng() - 0.5) * isl4.ry * 1.0);
         this.placeTreeCluster(tx, ty, 2 + Math.floor(rng() * 3), 2 + Math.floor(rng() * 2));
       }
 
@@ -187,29 +257,68 @@
       this.depots = [];
       const depotCount = 6 + Math.floor(rng() * 3) + (isEpic ? 2 : 0);
       for (let d = 0; d < depotCount; d++) {
-        const dx = Math.floor(base1X + 8 + rng() * (base2X - base1X - 16));
-        const dy = Math.floor(cy + (rng() - 0.5) * H * 0.6);
+        const islandIdx = Math.floor(rng() * numIslands);
+        const isl5 = islands[islandIdx];
+        const dx = Math.floor(isl5.cx + (rng() - 0.5) * isl5.rx * 0.8);
+        const dy = Math.floor(isl5.cy + (rng() - 0.5) * isl5.ry * 0.8);
         const dtype = rng() < 0.5 ? T.DEPOT_AMMO : T.DEPOT_FUEL;
         this.placeDepot(dx, dy, dtype);
       }
 
-      // ---- Turrets (2 per side + extras for higher rounds) ----
+      // ---- Turrets ----
       this.turrets = [];
       const turretsPerSide = 2 + (isEpic ? 2 : Math.min(Math.floor(this.roundNum / 3), 2));
       for (let t = 0; t < turretsPerSide; t++) {
-        const ty1 = baseY + Math.floor((rng() - 0.5) * laneOff * 1.5);
-        this.placeTurret(base1X + 4 + Math.floor(rng() * 4), ty1, 1);
-        const ty2 = baseY + Math.floor((rng() - 0.5) * laneOff * 1.5);
-        this.placeTurret(base2X - 4 - Math.floor(rng() * 4), ty2, 2);
+        const ty1 = base1Y + Math.floor((rng() - 0.5) * 8);
+        this.placeTurret(base1X + 3 + Math.floor(rng() * 4), ty1, 1);
+        const ty2 = base2Y + Math.floor((rng() - 0.5) * 8);
+        this.placeTurret(base2X - 3 - Math.floor(rng() * 4), ty2, 2);
       }
 
-      // Clean base areas & replant
-      this.clearArea(base1X - 1, baseY - 2, 5, 5);
-      this.clearArea(base2X - 2, baseY - 2, 5, 5);
-      this.placeBase(base1X, baseY, 1);
-      this.placeBase(base2X, baseY, 2);
+      // Final cleanup of base areas
+      this.clearArea(base1X - 1, base1Y - 2, 5, 5);
+      this.clearArea(base2X - 2, base2Y - 2, 5, 5);
+      this.placeBase(base1X, base1Y, 1);
+      this.placeBase(base2X, base2Y, 2);
 
       return this;
+    }
+
+    /**
+     * Build a wooden bridge between two points, clearing a 3-wide path
+     * across water. Adds BRIDGE tiles over water and ROAD on land.
+     */
+    buildBridge(x1, y1, x2, y2, rng) {
+      const steps = Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1));
+      if (steps === 0) return;
+
+      // Slight curve via midpoint offset
+      const midX = (x1 + x2) / 2 + (rng() - 0.5) * 4;
+      const midY = (y1 + y2) / 2 + (rng() - 0.5) * 4;
+
+      const allSteps = steps * 2;
+      for (let i = 0; i <= allSteps; i++) {
+        const t = i / allSteps;
+        // Quadratic bezier through midpoint
+        const px = (1-t)*(1-t)*x1 + 2*(1-t)*t*midX + t*t*x2;
+        const py = (1-t)*(1-t)*y1 + 2*(1-t)*t*midY + t*t*y2;
+        const ix = Math.round(px);
+        const iy = Math.round(py);
+
+        // 3-wide bridge path
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const tx = ix + dx, ty = iy + dy;
+            if (tx >= 0 && tx < this.width && ty >= 0 && ty < this.height) {
+              if (this.tiles[ty][tx] === T.WATER) {
+                this.tiles[ty][tx] = T.BRIDGE;
+              } else if (this.tiles[ty][tx] === T.SAND) {
+                this.tiles[ty][tx] = T.ROAD;
+              }
+            }
+          }
+        }
+      }
     }
 
     clearArea(x, y, w, h) {

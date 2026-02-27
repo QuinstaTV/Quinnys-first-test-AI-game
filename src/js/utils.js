@@ -34,7 +34,8 @@
     GAME_OVER: 3,
     LOBBY: 4,
     ROUND_STATS: 5,
-    FINAL_STATS: 6
+    FINAL_STATS: 6,
+    SETTINGS: 7
   };
 
   // Team colours

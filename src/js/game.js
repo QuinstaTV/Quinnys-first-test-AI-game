@@ -74,7 +74,7 @@
   const MAX_JEEP_LIVES = 3;
 
   // Respawn
-  const RESPAWN_TIME = 1.5; // short animation then straight to garage
+  const RESPAWN_TIME = 3.0; // 3 second countdown before returning to vehicle select
   let respawnTimer = 0;
   let isRespawning = false;
 
@@ -118,6 +118,12 @@
     Game.Audio.init();
     Game.UI.init(canvas);
 
+    // Load saved username from localStorage
+    try {
+      var savedName = localStorage.getItem('dt_username');
+      if (savedName) Game.UI.username = savedName;
+    } catch (e) {}
+
     // Screen shake function
     Game.screenShake = function (amount) {
       shakeAmount = Math.max(shakeAmount, amount);
@@ -144,10 +150,26 @@
     // Cap DPR at 2 for performance on high-DPI devices
     dpr = Math.min(dpr, 2);
 
-    // Always use actual viewport dimensions — no minimum that can exceed
-    // the viewport and cause right-shift / coordinate mismatch.
+    // Always use actual viewport dimensions
     screenW = window.innerWidth;
     screenH = window.innerHeight;
+
+    // Desktop minimum: ensure menus remain usable on very small windows
+    // but never exceed viewport (the v1.4.0 bug).
+    // On desktop browsers (non-touch), use a logical minimum of 960x540
+    // if the viewport is larger than that.  This prevents elements from
+    // being clipped at extreme sizes.
+    var isDesktop = !Game.Input || !Game.Input.isTouch;
+    if (isDesktop) {
+      // For desktop: the design targets 1920x1080.
+      // We compute a uniform scale factor relative to that baseline
+      // and expose it to UI so drawing adapts proportionally.
+      Game.uiScale = Math.min(screenW / 1920, screenH / 1080);
+      Game.uiScale = Math.max(Game.uiScale, 0.5); // floor so text stays readable
+    } else {
+      Game.uiScale = Math.min(screenW / 960, screenH / 540);
+      Game.uiScale = Math.max(Game.uiScale, 0.45);
+    }
 
     // Set canvas backing resolution (crisp rendering)
     canvas.width = Math.round(screenW * dpr);
@@ -206,6 +228,9 @@
       case STATE.FINAL_STATS:
         updateFinalStats(dt);
         break;
+      case STATE.SETTINGS:
+        updateSettings(dt);
+        break;
     }
   }
 
@@ -221,11 +246,11 @@
     }
 
     if (Game.Input.wasPressed('ArrowUp') || Game.Input.wasPressed('KeyW')) {
-      menuSelection = (menuSelection - 1 + 3) % 3;
+      menuSelection = (menuSelection - 1 + 4) % 4;
       Game.Audio.play('click');
     }
     if (Game.Input.wasPressed('ArrowDown') || Game.Input.wasPressed('KeyS')) {
-      menuSelection = (menuSelection + 1) % 3;
+      menuSelection = (menuSelection + 1) % 4;
       Game.Audio.play('click');
     }
     Game.UI.selectedMenuItem = menuSelection;
@@ -258,6 +283,9 @@
         startMultiplayer();
         break;
       case 2:
+        state = STATE.SETTINGS;
+        break;
+      case 3:
         showingHowToPlay = true;
         break;
     }
@@ -272,7 +300,11 @@
       if (item >= 0) selectMenuItem(item);
     } else if (state === STATE.VEHICLE_SELECT) {
       const veh = Game.UI.getVehicleClick();
-      if (veh >= 0 && vehiclePool[veh]) {
+      if (veh === -2) {
+        // Back button
+        state = STATE.MENU;
+        Game.Audio.play('click');
+      } else if (veh >= 0 && vehiclePool[veh]) {
         selectedVehicle = veh;
         Game.Audio.play('click');
         if (map) {
@@ -285,15 +317,43 @@
       }
     } else if (state === STATE.LOBBY) {
       const action = Game.UI.getLobbyAction();
-      if (action === 'create') {
-        Game.Network.createRoom('Game ' + Math.floor(Math.random() * 1000));
+      if (action === 'back') {
+        if (Game.Network.inRoom) {
+          Game.Network.leaveRoom();
+        } else {
+          state = STATE.MENU;
+          Game.Network.disconnect();
+        }
+        Game.Audio.play('click');
+      } else if (action === 'create') {
+        var username = Game.UI.username || 'Player';
+        Game.Network.createRoom('Game ' + Math.floor(Math.random() * 1000), username);
       } else if (action === 'refresh') {
         Game.Network.requestRooms();
+      } else if (action === 'ready') {
+        Game.Network.toggleReady();
+        Game.Audio.play('click');
+      } else if (action === 'start') {
+        Game.Network.startGame();
+        Game.Audio.play('click');
+      } else if (action === 'cancelCountdown') {
+        Game.Network.cancelCountdown();
+        Game.Audio.play('click');
+      } else if (action === 'switchTeam') {
+        Game.Network.switchTeam();
+        Game.Audio.play('click');
+      } else if (action === 'leave') {
+        Game.Network.leaveRoom();
+        Game.Audio.play('click');
       } else if (action && action.action === 'join') {
         const rooms = Game.Network.lobby.rooms;
+        var username2 = Game.UI.username || 'Player';
         if (rooms[action.index]) {
-          Game.Network.joinRoom(rooms[action.index].id);
+          Game.Network.joinRoom(rooms[action.index].id, username2);
         }
+      } else if (action && action.action === 'addAI') {
+        Game.Network.addAI(action.team);
+        Game.Audio.play('click');
       }
     }
   }
@@ -559,6 +619,45 @@
     }
   }
 
+  function updateSettings(dt) {
+    if (Game.Input.wasPressed('Escape')) {
+      state = STATE.MENU;
+      return;
+    }
+
+    // Handle keyboard input for username editing
+    var keys = Game.Input.getTypedKeys ? Game.Input.getTypedKeys() : [];
+    for (var ki = 0; ki < keys.length; ki++) {
+      var key = keys[ki];
+      if (key === 'Backspace') {
+        Game.UI.username = Game.UI.username.slice(0, -1);
+      } else if (key.length === 1 && Game.UI.username.length < 16) {
+        Game.UI.username = Game.UI.username + key;
+      }
+    }
+
+    if (Game.Input.wasClicked()) {
+      var action = Game.UI.getSettingsAction();
+      if (action === 'back') {
+        state = STATE.MENU;
+      } else if (action === 'save') {
+        Game.Audio.play('click');
+        // Save username to localStorage
+        try { localStorage.setItem('dt_username', Game.UI.username); } catch(e) {}
+        Game.UI.notify('Settings saved!', '#0f0', 2);
+        state = STATE.MENU;
+      } else if (action === 'username_field') {
+        // Focus the username field - prompt for input on mobile
+        if (Game.Input.isTouch) {
+          var newName = prompt('Enter username:', Game.UI.username);
+          if (newName !== null && newName.trim()) {
+            Game.UI.username = newName.trim().substring(0, 16);
+          }
+        }
+      }
+    }
+  }
+
   /* ---------- Playing ---------- */
   function updatePlaying(dt) {
     if (!map) return;
@@ -709,15 +808,16 @@
       } else {
         fuelWarnTimer = 0;
       }
+    }
 
-      // Check player death -> immediate garage return
-      if (!playerVehicle.alive && !isRespawning) {
-        isRespawning = true;
-        respawnTimer = RESPAWN_TIME;
-        recordDeath(playerVehicle.team, true);
-        Game.Audio.stopMusic();
-        Game.UI.notify('Vehicle destroyed!', '#ff4444', 2);
-      }
+    // Check player death -> 3s countdown then vehicle select
+    // MUST be outside the alive block so projectile/turret kills are caught
+    if (playerVehicle && !playerVehicle.alive && !isRespawning) {
+      isRespawning = true;
+      respawnTimer = RESPAWN_TIME;
+      recordDeath(playerVehicle.team, true);
+      Game.Audio.stopMusic();
+      Game.UI.notify('Vehicle destroyed!', '#ff4444', 2);
     }
 
     // Update AI (with SP vehicle limits)
@@ -1049,9 +1149,15 @@
       Game.UI.lobbyRooms = rooms;
     });
     Game.Network.on('onRoomJoined', function (data) {
-      Game.UI.lobbyStatus = 'Joined room: ' + data.roomId + ' as Team ' + data.team;
+      Game.UI.lobbyStatus = 'Joined room: ' + data.roomId;
       Game.UI.notify('Joined room!', '#0f0', 2);
-      state = STATE.VEHICLE_SELECT;
+      // Stay in lobby state (not vehicle select) - show in-room lobby
+    });
+    Game.Network.on('onLobbyUpdate', function (data) {
+      // Lobby data updated by network.js automatically
+    });
+    Game.Network.on('onCountdown', function (data) {
+      // Countdown updated by network.js automatically
     });
     Game.Network.on('onGameStart', function (data) {
       startMultiplayerGame(data);
@@ -1070,22 +1176,54 @@
 
   function updateLobby(dt) {
     if (Game.Input.wasPressed('Escape')) {
-      Game.Network.disconnect();
-      state = STATE.MENU;
+      if (Game.Network.inRoom) {
+        Game.Network.leaveRoom();
+      } else {
+        Game.Network.disconnect();
+        state = STATE.MENU;
+      }
+      return;
     }
 
     // Touch tap / mouse click on lobby buttons
     if (Game.Input.wasClicked()) {
       var action = Game.UI.getLobbyAction();
-      if (action === 'create') {
-        Game.Network.createRoom('Game ' + Math.floor(Math.random() * 1000));
+      if (action === 'back') {
+        if (Game.Network.inRoom) {
+          Game.Network.leaveRoom();
+        } else {
+          Game.Network.disconnect();
+          state = STATE.MENU;
+        }
+      } else if (action === 'create') {
+        var username = Game.UI.username || 'Player';
+        Game.Network.createRoom('Game ' + Math.floor(Math.random() * 1000), username);
       } else if (action === 'refresh') {
         Game.Network.requestRooms();
+      } else if (action === 'ready') {
+        Game.Network.toggleReady();
+        Game.Audio.play('click');
+      } else if (action === 'start') {
+        Game.Network.startGame();
+        Game.Audio.play('click');
+      } else if (action === 'cancelCountdown') {
+        Game.Network.cancelCountdown();
+        Game.Audio.play('click');
+      } else if (action === 'switchTeam') {
+        Game.Network.switchTeam();
+        Game.Audio.play('click');
+      } else if (action === 'leave') {
+        Game.Network.leaveRoom();
+        Game.Audio.play('click');
       } else if (action && action.action === 'join') {
         var rooms = Game.Network.lobby.rooms;
+        var username2 = Game.UI.username || 'Player';
         if (rooms[action.index]) {
-          Game.Network.joinRoom(rooms[action.index].id);
+          Game.Network.joinRoom(rooms[action.index].id, username2);
         }
+      } else if (action && action.action === 'addAI') {
+        Game.Network.addAI(action.team);
+        Game.Audio.play('click');
       }
     }
   }
@@ -1116,8 +1254,12 @@
     playerVehicle.networkId = Game.Network.playerId;
     allVehicles.push(playerVehicle);
 
+    // NO AI spawning in multiplayer - players and server-managed AI only
+
     Game.Audio.playMusic(selectedVehicle);
-    state = STATE.PLAYING;
+
+    // Go through vehicle select first
+    state = STATE.VEHICLE_SELECT;
   }
 
   function handleNetworkState(data) {
@@ -1178,7 +1320,29 @@
         break;
 
       case STATE.LOBBY:
-        Game.UI.renderLobby(Game.Network.lobby.rooms, Game.UI.lobbyStatus);
+        var lobbyInfo = {
+          rooms: Game.Network.lobby.rooms,
+          status: Game.UI.lobbyStatus,
+          inRoom: Game.Network.inRoom,
+          roomPlayers: Game.Network.lobbyData.players,
+          playerTeam: Game.Network.playerTeam,
+          isHost: Game.Network.isHost,
+          countdown: Game.Network.lobbyData.countdown,
+          readyStates: {},
+          roomName: Game.Network.lobbyData.roomName,
+          playerId: Game.Network.playerId
+        };
+        // Build readyStates map from players array
+        if (lobbyInfo.roomPlayers) {
+          for (var lp = 0; lp < lobbyInfo.roomPlayers.length; lp++) {
+            lobbyInfo.readyStates[lobbyInfo.roomPlayers[lp].id] = lobbyInfo.roomPlayers[lp].ready;
+          }
+        }
+        Game.UI.renderLobby(lobbyInfo);
+        break;
+
+      case STATE.SETTINGS:
+        Game.UI.renderSettings();
         break;
     }
   }

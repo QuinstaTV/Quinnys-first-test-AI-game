@@ -20,6 +20,8 @@ const mockCtx = {
   translate: jest.fn(),
   rotate: jest.fn(),
   scale: jest.fn(),
+  ellipse: jest.fn(),
+  arcTo: jest.fn(),
   createLinearGradient: jest.fn(() => ({ addColorStop: jest.fn() })),
   createRadialGradient: jest.fn(() => ({ addColorStop: jest.fn() })),
   createImageData: jest.fn(() => ({ data: new Uint8ClampedArray(4) })),

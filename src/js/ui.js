@@ -1,6 +1,6 @@
 /* ============================================================
-   ui.js - Menus, HUD, minimap, vehicle select, lobby, 
-   game over screen, score display
+   ui.js - Menus, HUD, minimap, vehicle select, lobby,
+   game over screen, score display, settings, username labels
    ============================================================ */
 (function () {
   'use strict';
@@ -17,6 +17,22 @@
   let lobbyInput = '';
   let vehicleHover = -1;
 
+  // Lobby data for enhanced lobby
+  let _lobbyData = {
+    rooms: [],
+    status: '',
+    inRoom: false,
+    roomPlayers: [],
+    playerTeam: 1,
+    isHost: false,
+    countdown: 0,
+    readyStates: {},
+    roomName: ''
+  };
+
+  // Settings state
+  let _username = 'Player';
+
   function init(c) {
     canvas = c;
     ctx = c.getContext('2d');
@@ -29,69 +45,195 @@
     screenH = h;
   }
 
-  /* ========== MAIN MENU ========== */
-  function renderMenu() {
-    // Background
-    ctx.fillStyle = '#0a0a1a';
+  /* ========== BACK BUTTON HELPER ========== */
+  function _drawBackButton() {
+    var s = Game.uiScale || 1;
+    var bx = 12 * s;
+    var by = 12 * s;
+    var bw = 90 * s;
+    var bh = 34 * s;
+    var hover = isMouseInRect(bx, by, bw, bh);
+    ctx.fillStyle = hover ? 'rgba(255,102,0,0.25)' : 'rgba(255,255,255,0.06)';
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.strokeStyle = hover ? '#ff6600' : '#4a5a3a';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(bx, by, bw, bh);
+    ctx.fillStyle = hover ? '#ff6600' : '#aaa';
+    ctx.font = 'bold ' + Math.round(14 * s) + 'px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('< BACK', bx + bw / 2, by + bh / 2 + 5 * s);
+    return { x: bx, y: by, w: bw, h: bh };
+  }
+
+  var _lastBackBtn = null;
+
+  function getBackClick() {
+    updateMouse();
+    if (_lastBackBtn) {
+      if (isMouseInRect(_lastBackBtn.x, _lastBackBtn.y, _lastBackBtn.w, _lastBackBtn.h)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /* ========== CAMO PATTERN HELPER ========== */
+  function _drawCamoBackground() {
+    // Dark olive base
+    ctx.fillStyle = '#1a1f14';
     ctx.fillRect(0, 0, screenW, screenH);
 
-    // Stars
-    for (let i = 0; i < 80; i++) {
-      const sx = (Math.sin(i * 127.1) * 0.5 + 0.5) * screenW;
-      const sy = (Math.cos(i * 311.7) * 0.5 + 0.5) * screenH;
-      const brightness = Math.sin(Date.now() * 0.001 + i) * 0.3 + 0.7;
-      ctx.fillStyle = `rgba(255,255,255,${brightness * 0.5})`;
-      ctx.fillRect(sx, sy, 2, 2);
+    // Subtle camo blobs
+    var seed = 42;
+    for (var i = 0; i < 60; i++) {
+      seed = (seed * 16807 + 7) % 2147483647;
+      var cx = (seed % screenW);
+      seed = (seed * 16807 + 7) % 2147483647;
+      var cy = (seed % screenH);
+      seed = (seed * 16807 + 7) % 2147483647;
+      var r = 30 + (seed % 80);
+      seed = (seed * 16807 + 7) % 2147483647;
+      var shade = seed % 3;
+      var colors = ['rgba(42,48,32,0.4)', 'rgba(58,74,42,0.25)', 'rgba(30,36,22,0.35)'];
+      ctx.fillStyle = colors[shade];
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, r, r * 0.6, (seed % 314) / 100, 0, Math.PI * 2);
+      ctx.fill();
     }
 
-    // Logo
-    const logo = Game.Sprites.sprites.logo;
+    // Subtle grid overlay
+    ctx.strokeStyle = 'rgba(255,255,255,0.015)';
+    ctx.lineWidth = 1;
+    for (var y = 0; y < screenH; y += 32) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(screenW, y);
+      ctx.stroke();
+    }
+    for (var x = 0; x < screenW; x += 32) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, screenH);
+      ctx.stroke();
+    }
+  }
+
+  /* ========== MAIN MENU ========== */
+  function renderMenu() {
+    _drawCamoBackground();
+
+    var s = Game.uiScale || 1;
+    var cx = screenW / 2;
+
+    // Military-style horizontal lines at top
+    ctx.strokeStyle = '#4a5a3a';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 280 * s, 40 * s);
+    ctx.lineTo(cx + 280 * s, 40 * s);
+    ctx.stroke();
+
+    // Title
+    ctx.fillStyle = '#ff6600';
+    ctx.font = 'bold ' + Math.round(36 * s) + 'px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('DAMAGED TERRITORY', cx, 80 * s);
+
+    // Subtitle
+    ctx.fillStyle = '#8a9a6a';
+    ctx.font = Math.round(13 * s) + 'px monospace';
+    ctx.fillText('CAPTURE  THE  FLAG', cx, 102 * s);
+
+    // Military-style horizontal lines below title
+    ctx.strokeStyle = '#4a5a3a';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 280 * s, 115 * s);
+    ctx.lineTo(cx + 280 * s, 115 * s);
+    ctx.stroke();
+
+    // Logo sprite if available
+    var logo = Game.Sprites.sprites.logo;
     if (logo) {
-      ctx.drawImage(logo, screenW / 2 - 250, 60);
+      var lw = Math.min(500 * s, screenW * 0.5);
+      var lh = lw * (logo.height / logo.width);
+      ctx.globalAlpha = 0.15;
+      ctx.drawImage(logo, cx - lw / 2, 30 * s, lw, lh);
+      ctx.globalAlpha = 1;
     }
 
-    // Menu items
-    const items = [
+    // Menu items (4 items now)
+    var items = [
       { label: 'SINGLE PLAYER', desc: 'Battle against AI opponents' },
       { label: 'MULTIPLAYER', desc: 'Play online with others' },
+      { label: 'SETTINGS', desc: 'Configure your game options' },
       { label: 'HOW TO PLAY', desc: 'Controls and objectives' }
     ];
 
-    const startY = 200;
-    items.forEach((item, i) => {
-      const y = startY + i * 70;
-      const isSelected = i === selectedMenuItem;
-      const hover = isMouseInRect(screenW / 2 - 160, y - 5, 320, 50);
+    var startY = 150 * s;
+    var itemH = 56 * s;
+    var itemGap = 10 * s;
+    var itemW = 340 * s;
+
+    for (var i = 0; i < items.length; i++) {
+      var y = startY + i * (itemH + itemGap);
+      var isSelected = i === selectedMenuItem;
+      var hover = isMouseInRect(cx - itemW / 2, y, itemW, itemH);
 
       // Background
-      ctx.fillStyle = isSelected || hover ? 'rgba(255,102,0,0.2)' : 'rgba(255,255,255,0.05)';
-      ctx.fillRect(screenW / 2 - 160, y - 5, 320, 50);
+      ctx.fillStyle = isSelected || hover ? 'rgba(255,102,0,0.12)' : 'rgba(255,255,255,0.03)';
+      ctx.fillRect(cx - itemW / 2, y, itemW, itemH);
 
+      // Border
+      ctx.strokeStyle = isSelected || hover ? '#ff6600' : '#4a5a3a';
+      ctx.lineWidth = isSelected ? 2.5 : 1;
+      ctx.strokeRect(cx - itemW / 2, y, itemW, itemH);
+
+      // Chevron decorations for selected
       if (isSelected || hover) {
-        ctx.strokeStyle = '#ff6600';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(screenW / 2 - 160, y - 5, 320, 50);
+        ctx.fillStyle = '#ff6600';
+        ctx.font = 'bold ' + Math.round(14 * s) + 'px monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText('>>>', cx - itemW / 2 + 30 * s, y + itemH / 2 + 2);
+        ctx.textAlign = 'left';
+        ctx.fillText('<<<', cx + itemW / 2 - 30 * s, y + itemH / 2 + 2);
       }
 
+      // Label
       ctx.fillStyle = isSelected || hover ? '#ff6600' : '#ccc';
-      ctx.font = 'bold 20px monospace';
+      ctx.font = 'bold ' + Math.round(18 * s) + 'px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(item.label, screenW / 2, y + 20);
+      ctx.fillText(items[i].label, cx, y + itemH / 2 - 4 * s);
 
-      ctx.fillStyle = '#666';
-      ctx.font = '12px monospace';
-      ctx.fillText(item.desc, screenW / 2, y + 38);
-    });
+      // Description
+      ctx.fillStyle = isSelected || hover ? '#aa7733' : '#666';
+      ctx.font = Math.round(11 * s) + 'px monospace';
+      ctx.fillText(items[i].desc, cx, y + itemH / 2 + 14 * s);
+    }
 
-    // Version / Credits
-    ctx.fillStyle = '#444';
-    ctx.font = '11px monospace';
+    // Footer separator
+    var footY = screenH - 65 * s;
+    ctx.strokeStyle = '#4a5a3a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - 280 * s, footY);
+    ctx.lineTo(cx + 280 * s, footY);
+    ctx.stroke();
+
+    // Credits
+    ctx.fillStyle = '#ff6600';
+    ctx.font = 'bold ' + Math.round(13 * s) + 'px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('v1.4 - Inspired by Return Fire (1995) - MIT License', screenW / 2, screenH - 30);
+    ctx.fillText('Created by Quinsta & QuinstaJr', cx, footY + 20 * s);
+
+    // Version & controls
+    ctx.fillStyle = '#4a5a3a';
+    ctx.font = Math.round(10 * s) + 'px monospace';
+    ctx.fillText('v1.5.0 - Inspired by Return Fire (1995) - MIT License', cx, footY + 38 * s);
     if (Game.Input.isTouch) {
-      ctx.fillText('Tap to select  |  Touch controls in-game', screenW / 2, screenH - 14);
+      ctx.fillText('Tap to select  |  Touch controls in-game', cx, footY + 52 * s);
     } else {
-      ctx.fillText('WASD/Arrows to move | Space/Click to shoot | 1-4 select vehicle', screenW / 2, screenH - 14);
+      ctx.fillText('WASD/Arrows to navigate | Enter to select | 1-4 select vehicle', cx, footY + 52 * s);
     }
   }
 
@@ -139,6 +281,9 @@
 
     // --- Bunker vehicle select ---
     renderBunkerScene(currentType, pool, vehicleNames, false, jLives);
+
+    // Back button at top-left
+    _lastBackBtn = _drawBackButton();
 
     // Description panel at bottom
     const descY = screenH - 120;
@@ -213,7 +358,7 @@
     ctx.fillStyle = '#ff6600';
     ctx.font = 'bold 22px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('⚙ VEHICLE BAY ⚙', screenW / 2, 40);
+    ctx.fillText('\u2699 VEHICLE BAY \u2699', screenW / 2, 40);
 
     // Vehicle bays
     const bayW = 150, bayH = 200, bayGap = 20;
@@ -328,12 +473,12 @@
         ctx.fillStyle = '#ffaa00';
         ctx.font = 'bold 10px monospace';
         let livesStr = '';
-        for (let l = 0; l < jLives; l++) livesStr += '♥ ';
-        ctx.fillText(`LIVES: ${livesStr}`, x + bayW / 2, bayY + 28);
+        for (let l = 0; l < jLives; l++) livesStr += '\u2665 ';
+        ctx.fillText('LIVES: ' + livesStr, x + bayW / 2, bayY + 28);
       } else {
         ctx.fillStyle = '#555';
         ctx.font = '10px monospace';
-        ctx.fillText(`[${i + 1}]`, x + bayW / 2, bayY + bayH + 14);
+        ctx.fillText('[' + (i + 1) + ']', x + bayW / 2, bayY + bayH + 14);
       }
     }
 
@@ -363,73 +508,446 @@
   }
 
   /* ========== LOBBY ========== */
-  function renderLobby(rooms, status) {
-    ctx.fillStyle = 'rgba(0,0,0,0.9)';
-    ctx.fillRect(0, 0, screenW, screenH);
+  function renderLobby(roomsOrData, status) {
+    // Support both old-style (rooms, status) and new lobbyData
+    var lobbyData;
+    if (roomsOrData && typeof roomsOrData === 'object' && !Array.isArray(roomsOrData) && roomsOrData.hasOwnProperty('inRoom')) {
+      lobbyData = roomsOrData;
+    } else {
+      lobbyData = {
+        rooms: roomsOrData || lobbyRooms || [],
+        status: status || lobbyStatus || '',
+        inRoom: _lobbyData.inRoom || false,
+        roomPlayers: _lobbyData.roomPlayers || [],
+        playerTeam: _lobbyData.playerTeam || 1,
+        isHost: _lobbyData.isHost || false,
+        countdown: _lobbyData.countdown || 0,
+        readyStates: _lobbyData.readyStates || {},
+        roomName: _lobbyData.roomName || ''
+      };
+    }
 
+    // If in a room, show the full lobby screen
+    if (lobbyData.inRoom) {
+      _renderInRoomLobby(lobbyData);
+      return;
+    }
+
+    // Otherwise show room browser
+    _renderRoomBrowser(lobbyData);
+  }
+
+  function _renderRoomBrowser(lobbyData) {
+    _drawCamoBackground();
+
+    var s = Game.uiScale || 1;
+    var cx = screenW / 2;
+
+    // Back button
+    _lastBackBtn = _drawBackButton();
+
+    // Title
     ctx.fillStyle = '#ff6600';
-    ctx.font = 'bold 24px monospace';
+    ctx.font = 'bold ' + Math.round(24 * s) + 'px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('MULTIPLAYER LOBBY', screenW / 2, 50);
+    ctx.fillText('MULTIPLAYER LOBBY', cx, 50 * s);
 
-    ctx.fillStyle = '#aaa';
-    ctx.font = '14px monospace';
-    ctx.fillText(status || 'Connecting to server...', screenW / 2, 80);
+    // Status
+    ctx.fillStyle = '#8a9a6a';
+    ctx.font = Math.round(13 * s) + 'px monospace';
+    ctx.fillText(lobbyData.status || 'Connecting to server...', cx, 75 * s);
+
+    // Separator
+    ctx.strokeStyle = '#4a5a3a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - 220 * s, 88 * s);
+    ctx.lineTo(cx + 220 * s, 88 * s);
+    ctx.stroke();
 
     // Room list
-    const startY = 120;
+    var rooms = lobbyData.rooms;
+    var startY = 105 * s;
+    var roomH = 38 * s;
+    var roomW = 420 * s;
+
     if (rooms && rooms.length > 0) {
-      rooms.forEach((room, i) => {
-        const y = startY + i * 40;
-        const hover = isMouseInRect(screenW / 2 - 200, y, 400, 35);
+      for (var i = 0; i < rooms.length; i++) {
+        var y = startY + i * (roomH + 4);
+        var hover = isMouseInRect(cx - roomW / 2, y, roomW, roomH);
 
-        ctx.fillStyle = hover ? 'rgba(255,102,0,0.2)' : 'rgba(255,255,255,0.05)';
-        ctx.fillRect(screenW / 2 - 200, y, 400, 35);
-
-        if (hover) {
-          ctx.strokeStyle = '#ff6600';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(screenW / 2 - 200, y, 400, 35);
-        }
+        ctx.fillStyle = hover ? 'rgba(255,102,0,0.15)' : 'rgba(255,255,255,0.04)';
+        ctx.fillRect(cx - roomW / 2, y, roomW, roomH);
+        ctx.strokeStyle = hover ? '#ff6600' : '#4a5a3a';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(cx - roomW / 2, y, roomW, roomH);
 
         ctx.fillStyle = '#ccc';
-        ctx.font = '14px monospace';
+        ctx.font = Math.round(13 * s) + 'px monospace';
         ctx.textAlign = 'left';
-        ctx.fillText(room.name, screenW / 2 - 180, y + 22);
+        ctx.fillText(rooms[i].name, cx - roomW / 2 + 14 * s, y + roomH / 2 + 4 * s);
 
         ctx.textAlign = 'right';
         ctx.fillStyle = '#888';
-        ctx.fillText(`${room.players}/${room.maxPlayers} players`, screenW / 2 + 180, y + 22);
-      });
+        ctx.fillText(rooms[i].players + '/' + rooms[i].maxPlayers + ' players', cx + roomW / 2 - 14 * s, y + roomH / 2 + 4 * s);
+      }
     } else {
       ctx.fillStyle = '#666';
-      ctx.font = '14px monospace';
+      ctx.font = Math.round(13 * s) + 'px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('No rooms available', screenW / 2, startY + 20);
+      ctx.fillText('No rooms available', cx, startY + 20 * s);
     }
 
-    // Create room button
-    const btnY = screenH - 160;
-    const btnHover = isMouseInRect(screenW / 2 - 100, btnY, 200, 40);
+    // Create Room button
+    var btnW = 210 * s;
+    var btnH = 40 * s;
+    var btnY = screenH - 160 * s;
+    var btnHover = isMouseInRect(cx - btnW / 2, btnY, btnW, btnH);
     ctx.fillStyle = btnHover ? '#ff6600' : '#553300';
-    ctx.fillRect(screenW / 2 - 100, btnY, 200, 40);
+    ctx.fillRect(cx - btnW / 2, btnY, btnW, btnH);
+    ctx.strokeStyle = '#ff6600';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx - btnW / 2, btnY, btnW, btnH);
     ctx.fillStyle = '#fff';
-    ctx.font = 'bold 14px monospace';
+    ctx.font = 'bold ' + Math.round(14 * s) + 'px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('CREATE ROOM', screenW / 2, btnY + 26);
+    ctx.fillText('CREATE ROOM', cx, btnY + btnH / 2 + 5 * s);
 
     // Refresh button
-    const refY = btnY + 50;
-    const refHover = isMouseInRect(screenW / 2 - 100, refY, 200, 40);
+    var refY = btnY + btnH + 12 * s;
+    var refHover = isMouseInRect(cx - btnW / 2, refY, btnW, btnH);
     ctx.fillStyle = refHover ? '#336699' : '#223355';
-    ctx.fillRect(screenW / 2 - 100, refY, 200, 40);
+    ctx.fillRect(cx - btnW / 2, refY, btnW, btnH);
+    ctx.strokeStyle = '#4488aa';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx - btnW / 2, refY, btnW, btnH);
     ctx.fillStyle = '#fff';
-    ctx.fillText('REFRESH', screenW / 2, refY + 26);
+    ctx.fillText('REFRESH', cx, refY + btnH / 2 + 5 * s);
+
+    // ESC hint
+    ctx.fillStyle = '#4a5a3a';
+    ctx.font = Math.round(11 * s) + 'px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Press ESC for back', cx, screenH - 18 * s);
+  }
+
+  function _renderInRoomLobby(lobbyData) {
+    _drawCamoBackground();
+
+    var s = Game.uiScale || 1;
+    var cx = screenW / 2;
+
+    // Back (leave) button at top-left
+    _lastBackBtn = _drawBackButton();
+
+    // Title
+    ctx.fillStyle = '#ff6600';
+    ctx.font = 'bold ' + Math.round(26 * s) + 'px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('GAME LOBBY', cx, 44 * s);
+
+    if (lobbyData.roomName) {
+      ctx.fillStyle = '#8a9a6a';
+      ctx.font = Math.round(12 * s) + 'px monospace';
+      ctx.fillText('Room: ' + lobbyData.roomName, cx, 64 * s);
+    }
+
+    // Separator
+    ctx.strokeStyle = '#4a5a3a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - 300 * s, 76 * s);
+    ctx.lineTo(cx + 300 * s, 76 * s);
+    ctx.stroke();
+
+    // Two columns: TEAM 1 (BLUE) left, TEAM 2 (RED) right
+    var colW = 260 * s;
+    var colGap = 40 * s;
+    var colLeft = cx - colGap / 2 - colW;
+    var colRight = cx + colGap / 2;
+    var headerY = 95 * s;
+    var slotStartY = 120 * s;
+    var slotH = 42 * s;
+    var slotGap = 6 * s;
+
+    // Team 1 header
+    ctx.fillStyle = '#66aaff';
+    ctx.font = 'bold ' + Math.round(16 * s) + 'px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('TEAM 1 (BLUE)', colLeft + colW / 2, headerY);
+
+    // Team 2 header
+    ctx.fillStyle = '#ff7777';
+    ctx.fillText('TEAM 2 (RED)', colRight + colW / 2, headerY);
+
+    // Draw slots for each team (4 per team)
+    var players = lobbyData.roomPlayers || [];
+    var readyStates = lobbyData.readyStates || {};
+
+    for (var team = 1; team <= 2; team++) {
+      var colX = team === 1 ? colLeft : colRight;
+      var teamColor = team === 1 ? '#66aaff' : '#ff7777';
+      var teamDarkColor = team === 1 ? 'rgba(102,170,255,0.08)' : 'rgba(255,119,119,0.08)';
+      var teamBorderColor = team === 1 ? 'rgba(102,170,255,0.3)' : 'rgba(255,119,119,0.3)';
+
+      // Get players on this team
+      var teamPlayers = [];
+      for (var p = 0; p < players.length; p++) {
+        if (players[p].team === team) teamPlayers.push(players[p]);
+      }
+
+      for (var slot = 0; slot < 4; slot++) {
+        var sy = slotStartY + slot * (slotH + slotGap);
+        var player = teamPlayers[slot] || null;
+        var hover = isMouseInRect(colX, sy, colW, slotH);
+
+        // Slot background
+        ctx.fillStyle = player ? teamDarkColor : 'rgba(255,255,255,0.02)';
+        ctx.fillRect(colX, sy, colW, slotH);
+
+        // Slot border
+        ctx.strokeStyle = hover && !player ? '#ff6600' : (player ? teamBorderColor : '#3a4a2a');
+        ctx.lineWidth = 1;
+        ctx.strokeRect(colX, sy, colW, slotH);
+
+        if (player) {
+          // Player name
+          ctx.fillStyle = player.isAI ? '#aa8844' : '#ddd';
+          ctx.font = 'bold ' + Math.round(13 * s) + 'px monospace';
+          ctx.textAlign = 'left';
+          var nameStr = player.name || (player.isAI ? 'AI Bot' : 'Player');
+          ctx.fillText(nameStr, colX + 12 * s, sy + slotH / 2 + 2 * s);
+
+          // Ready indicator
+          var isReady = readyStates[player.id] || player.ready || false;
+          ctx.fillStyle = isReady ? '#44cc44' : '#cc4444';
+          ctx.font = 'bold ' + Math.round(14 * s) + 'px monospace';
+          ctx.textAlign = 'right';
+          ctx.fillText(isReady ? '\u2713' : '\u2717', colX + colW - 12 * s, sy + slotH / 2 + 4 * s);
+
+          // AI label
+          if (player.isAI) {
+            ctx.fillStyle = '#887744';
+            ctx.font = Math.round(9 * s) + 'px monospace';
+            ctx.textAlign = 'left';
+            ctx.fillText('AI', colX + 12 * s, sy + slotH / 2 + 14 * s);
+          }
+        } else {
+          // Empty slot
+          ctx.fillStyle = hover ? '#ff6600' : '#555';
+          ctx.font = Math.round(12 * s) + 'px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(hover ? '+ ADD AI' : 'EMPTY', colX + colW / 2, sy + slotH / 2 + 4 * s);
+        }
+      }
+    }
+
+    // Buttons row at bottom
+    var btnW = 150 * s;
+    var btnH = 38 * s;
+    var btnGap = 14 * s;
+    var btnRow1Y = slotStartY + 4 * (slotH + slotGap) + 16 * s;
+    var btnRow2Y = btnRow1Y + btnH + 10 * s;
+
+    // --- READY / NOT READY toggle ---
+    var rBtnX = cx - btnW - btnGap / 2;
+    var isPlayerReady = readyStates[lobbyData.playerId] || false;
+    var readyHover = isMouseInRect(rBtnX, btnRow1Y, btnW, btnH);
+    ctx.fillStyle = readyHover ? (isPlayerReady ? '#cc4444' : '#44cc44') : (isPlayerReady ? 'rgba(200,60,60,0.3)' : 'rgba(60,200,60,0.3)');
+    ctx.fillRect(rBtnX, btnRow1Y, btnW, btnH);
+    ctx.strokeStyle = isPlayerReady ? '#cc4444' : '#44cc44';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(rBtnX, btnRow1Y, btnW, btnH);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold ' + Math.round(13 * s) + 'px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(isPlayerReady ? 'NOT READY' : 'READY', rBtnX + btnW / 2, btnRow1Y + btnH / 2 + 5 * s);
+
+    // --- SWITCH TEAM button ---
+    var stBtnX = cx + btnGap / 2;
+    var stHover = isMouseInRect(stBtnX, btnRow1Y, btnW, btnH);
+    ctx.fillStyle = stHover ? 'rgba(255,170,0,0.4)' : 'rgba(255,170,0,0.15)';
+    ctx.fillRect(stBtnX, btnRow1Y, btnW, btnH);
+    ctx.strokeStyle = '#ffaa00';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(stBtnX, btnRow1Y, btnW, btnH);
+    ctx.fillStyle = '#fff';
+    ctx.fillText('SWITCH TEAM', stBtnX + btnW / 2, btnRow1Y + btnH / 2 + 5 * s);
+
+    // Row 2 buttons
+    if (lobbyData.isHost) {
+      // START GAME button (host only)
+      var allReady = true;
+      for (var pIdx = 0; pIdx < players.length; pIdx++) {
+        if (!players[pIdx].isAI && !(readyStates[players[pIdx].id] || players[pIdx].ready)) {
+          allReady = false;
+          break;
+        }
+      }
+
+      if (lobbyData.countdown > 0) {
+        // CANCEL button during countdown
+        var cancelHover = isMouseInRect(cx - btnW / 2, btnRow2Y, btnW, btnH);
+        ctx.fillStyle = cancelHover ? '#cc2222' : 'rgba(200,30,30,0.3)';
+        ctx.fillRect(cx - btnW / 2, btnRow2Y, btnW, btnH);
+        ctx.strokeStyle = '#cc2222';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(cx - btnW / 2, btnRow2Y, btnW, btnH);
+        ctx.fillStyle = '#fff';
+        ctx.fillText('CANCEL', cx, btnRow2Y + btnH / 2 + 5 * s);
+      } else {
+        var startHover = isMouseInRect(cx - btnW / 2, btnRow2Y, btnW, btnH) && allReady;
+        ctx.fillStyle = !allReady ? 'rgba(100,100,100,0.2)' : (startHover ? '#ff6600' : 'rgba(255,102,0,0.3)');
+        ctx.fillRect(cx - btnW / 2, btnRow2Y, btnW, btnH);
+        ctx.strokeStyle = allReady ? '#ff6600' : '#555';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(cx - btnW / 2, btnRow2Y, btnW, btnH);
+        ctx.fillStyle = allReady ? '#fff' : '#666';
+        ctx.fillText('START GAME', cx, btnRow2Y + btnH / 2 + 5 * s);
+      }
+    }
+
+    // LEAVE ROOM button (bottom right area)
+    var leaveW = 130 * s;
+    var leaveH = 34 * s;
+    var leaveX = screenW - leaveW - 16 * s;
+    var leaveY = screenH - leaveH - 16 * s;
+    var leaveHover = isMouseInRect(leaveX, leaveY, leaveW, leaveH);
+    ctx.fillStyle = leaveHover ? 'rgba(200,30,30,0.4)' : 'rgba(200,30,30,0.15)';
+    ctx.fillRect(leaveX, leaveY, leaveW, leaveH);
+    ctx.strokeStyle = '#cc4444';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(leaveX, leaveY, leaveW, leaveH);
+    ctx.fillStyle = leaveHover ? '#ff4444' : '#cc6666';
+    ctx.font = 'bold ' + Math.round(12 * s) + 'px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('LEAVE ROOM', leaveX + leaveW / 2, leaveY + leaveH / 2 + 4 * s);
+
+    // Countdown display
+    if (lobbyData.countdown > 0) {
+      var countVal = Math.ceil(lobbyData.countdown);
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(cx - 80 * s, btnRow2Y + btnH + 10 * s, 160 * s, 60 * s);
+
+      ctx.fillStyle = '#ff6600';
+      ctx.font = 'bold ' + Math.round(42 * s) + 'px monospace';
+      ctx.textAlign = 'center';
+      var countPulse = Math.sin(Date.now() * 0.008) * 0.2 + 0.8;
+      ctx.globalAlpha = countPulse;
+      ctx.fillText('' + countVal, cx, btnRow2Y + btnH + 52 * s);
+      ctx.globalAlpha = 1;
+
+      ctx.fillStyle = '#aaa';
+      ctx.font = Math.round(11 * s) + 'px monospace';
+      ctx.fillText('Starting...', cx, btnRow2Y + btnH + 68 * s);
+    }
+
+    // ESC hint
+    ctx.fillStyle = '#4a5a3a';
+    ctx.font = Math.round(10 * s) + 'px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Press ESC for back', cx, screenH - 6 * s);
+  }
+
+  /* ========== SETTINGS ========== */
+  // Track layout rects for click detection
+  var _settingsRects = { usernameField: null, saveBtn: null, backBtn: null };
+
+  function renderSettings() {
+    _drawCamoBackground();
+
+    var s = Game.uiScale || 1;
+    var cx = screenW / 2;
 
     // Back button
-    ctx.fillStyle = '#666';
-    ctx.font = '12px monospace';
-    ctx.fillText('Press ESC to go back', screenW / 2, screenH - 20);
+    _lastBackBtn = _drawBackButton();
+
+    // Title
+    ctx.fillStyle = '#ff6600';
+    ctx.font = 'bold ' + Math.round(28 * s) + 'px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('SETTINGS', cx, 60 * s);
+
+    // Separator
+    ctx.strokeStyle = '#4a5a3a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - 200 * s, 78 * s);
+    ctx.lineTo(cx + 200 * s, 78 * s);
+    ctx.stroke();
+
+    // Username label
+    var fieldY = 120 * s;
+    ctx.fillStyle = '#ccc';
+    ctx.font = 'bold ' + Math.round(14 * s) + 'px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('USERNAME', cx, fieldY);
+
+    // Username input field
+    var fieldW = 280 * s;
+    var fieldH = 40 * s;
+    var fieldX = cx - fieldW / 2;
+    var fieldTop = fieldY + 10 * s;
+
+    var fHover = isMouseInRect(fieldX, fieldTop, fieldW, fieldH);
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillRect(fieldX, fieldTop, fieldW, fieldH);
+    ctx.strokeStyle = fHover ? '#ff6600' : '#4a5a3a';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(fieldX, fieldTop, fieldW, fieldH);
+
+    // Username text
+    ctx.fillStyle = '#fff';
+    ctx.font = Math.round(16 * s) + 'px monospace';
+    ctx.textAlign = 'center';
+    var dispName = _username || '';
+    // Cursor blink
+    var cursorVisible = Math.floor(Date.now() / 500) % 2 === 0;
+    ctx.fillText(dispName + (cursorVisible ? '|' : ''), cx, fieldTop + fieldH / 2 + 6 * s);
+
+    _settingsRects.usernameField = { x: fieldX, y: fieldTop, w: fieldW, h: fieldH };
+
+    // SAVE button
+    var saveBtnW = 160 * s;
+    var saveBtnH = 42 * s;
+    var saveBtnY = fieldTop + fieldH + 30 * s;
+    var saveBtnX = cx - saveBtnW / 2;
+    var saveHover = isMouseInRect(saveBtnX, saveBtnY, saveBtnW, saveBtnH);
+
+    ctx.fillStyle = saveHover ? '#ff6600' : 'rgba(255,102,0,0.3)';
+    ctx.fillRect(saveBtnX, saveBtnY, saveBtnW, saveBtnH);
+    ctx.strokeStyle = '#ff6600';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(saveBtnX, saveBtnY, saveBtnW, saveBtnH);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold ' + Math.round(16 * s) + 'px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('SAVE', cx, saveBtnY + saveBtnH / 2 + 6 * s);
+
+    _settingsRects.saveBtn = { x: saveBtnX, y: saveBtnY, w: saveBtnW, h: saveBtnH };
+
+    // Hint
+    ctx.fillStyle = '#4a5a3a';
+    ctx.font = Math.round(11 * s) + 'px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Press ESC for back', cx, screenH - 20 * s);
+  }
+
+  function getSettingsAction() {
+    updateMouse();
+    // Check back button
+    if (_lastBackBtn && isMouseInRect(_lastBackBtn.x, _lastBackBtn.y, _lastBackBtn.w, _lastBackBtn.h)) {
+      return 'back';
+    }
+    // Check save button
+    if (_settingsRects.saveBtn && isMouseInRect(_settingsRects.saveBtn.x, _settingsRects.saveBtn.y, _settingsRects.saveBtn.w, _settingsRects.saveBtn.h)) {
+      return 'save';
+    }
+    // Check username field
+    if (_settingsRects.usernameField && isMouseInRect(_settingsRects.usernameField.x, _settingsRects.usernameField.y, _settingsRects.usernameField.w, _settingsRects.usernameField.h)) {
+      return 'username_field';
+    }
+    return null;
   }
 
   /* ========== HOW TO PLAY ========== */
@@ -581,12 +1099,12 @@
     // --- Tips list ---
     var tipY = diagY + diagH + 28;
     var tips = [
-      { icon: '🏁', text: 'Only JEEP can carry the flag!' },
-      { icon: '⛽', text: 'Vehicles have limited fuel & ammo' },
-      { icon: '🔧', text: 'Return to base or depots to resupply' },
-      { icon: '💥', text: 'Destroy walls to create shortcuts' },
-      { icon: '🚁', text: 'UrbanStrike flies over everything' },
-      { icon: '📱', text: 'Play in landscape for best experience' }
+      { icon: '\uD83C\uDFC1', text: 'Only JEEP can carry the flag!' },
+      { icon: '\u26FD', text: 'Vehicles have limited fuel & ammo' },
+      { icon: '\uD83D\uDD27', text: 'Return to base or depots to resupply' },
+      { icon: '\uD83D\uDCA5', text: 'Destroy walls to create shortcuts' },
+      { icon: '\uD83D\uDE81', text: 'UrbanStrike flies over everything' },
+      { icon: '\uD83D\uDCF1', text: 'Play in landscape for best experience' }
     ];
 
     ctx.textAlign = 'center';
@@ -612,30 +1130,30 @@
   function renderHowToPlayDesktop() {
     var lines = [
       '',
-      '╔══════════════════════════════════════════╗',
-      '║  OBJECTIVE: Capture the enemy flag and   ║',
-      '║  return it to your base. First to 3 wins!║',
-      '╠══════════════════════════════════════════╣',
-      '║                                          ║',
-      '║  CONTROLS:                               ║',
-      '║  WASD / Arrow Keys ... Move vehicle      ║',
-      '║  Mouse / Space ....... Shoot             ║',
-      '║  E ........... Lay mine (StrikeMaster)   ║',
-      '║  R ................... Swap vehicle       ║',
-      '║  M ................... Toggle music       ║',
-      '║  ESC ................. Pause / Menu       ║',
-      '║                                          ║',
-      '║  TIPS:                                   ║',
-      '║  • Only JEEP can carry the flag!         ║',
-      '║  • Vehicles have limited fuel & ammo     ║',
-      '║  • Return to base or depots to resupply  ║',
-      '║  • Destroy walls to create new paths     ║',
-      '║  • UrbanStrike flies over everything     ║',
-      '║  • StrikeMaster can lay mines behind it  ║',
-      '║  • BushMaster turret auto-aims enemies   ║',
-      '║  • Jeep has 3 respawn lives per round    ║',
-      '║                                          ║',
-      '╚══════════════════════════════════════════╝',
+      '\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557',
+      '\u2551  OBJECTIVE: Capture the enemy flag and   \u2551',
+      '\u2551  return it to your base. First to 3 wins!\u2551',
+      '\u2560\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2563',
+      '\u2551                                          \u2551',
+      '\u2551  CONTROLS:                               \u2551',
+      '\u2551  WASD / Arrow Keys ... Move vehicle      \u2551',
+      '\u2551  Mouse / Space ....... Shoot             \u2551',
+      '\u2551  E ........... Lay mine (StrikeMaster)   \u2551',
+      '\u2551  R ................... Swap vehicle       \u2551',
+      '\u2551  M ................... Toggle music       \u2551',
+      '\u2551  ESC ................. Pause / Menu       \u2551',
+      '\u2551                                          \u2551',
+      '\u2551  TIPS:                                   \u2551',
+      '\u2551  \u2022 Only JEEP can carry the flag!         \u2551',
+      '\u2551  \u2022 Vehicles have limited fuel & ammo     \u2551',
+      '\u2551  \u2022 Return to base or depots to resupply  \u2551',
+      '\u2551  \u2022 Destroy walls to create new paths     \u2551',
+      '\u2551  \u2022 UrbanStrike flies over everything     \u2551',
+      '\u2551  \u2022 StrikeMaster can lay mines behind it  \u2551',
+      '\u2551  \u2022 BushMaster turret auto-aims enemies   \u2551',
+      '\u2551  \u2022 Jeep has 3 respawn lives per round    \u2551',
+      '\u2551                                          \u2551',
+      '\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D',
       '',
       'Press any key to return to menu'
     ];
@@ -701,7 +1219,7 @@
       ctx.fillStyle = '#aaa';
       ctx.font = '11px monospace';
       ctx.textAlign = 'left';
-      ctx.fillText(`MINES: ${Math.floor(player.mineAmmo)}`, pad, pad + 72);
+      ctx.fillText('MINES: ' + Math.floor(player.mineAmmo), pad, pad + 72);
     }
 
     // Vehicle name
@@ -717,7 +1235,7 @@
       ctx.textAlign = 'left';
       const livesY = pad + (player.type === Game.VEH.ASV ? 100 : 86);
       let livesStr = 'LIVES: ';
-      for (let i = 0; i < jeepLives; i++) livesStr += '♥ ';
+      for (let i = 0; i < jeepLives; i++) livesStr += '\u2665 ';
       ctx.fillText(livesStr, pad, livesY);
     }
 
@@ -725,7 +1243,7 @@
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 18px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(`${score.team1}  -  ${score.team2}`, screenW / 2, 28);
+    ctx.fillText(score.team1 + '  -  ' + score.team2, screenW / 2, 28);
 
     // Team labels
     ctx.font = '12px monospace';
@@ -758,7 +1276,7 @@
       ctx.fillStyle = '#aaa';
       ctx.font = '12px monospace';
       ctx.textAlign = 'right';
-      ctx.fillText(`${mins}:${secs.toString().padStart(2, '0')}`, screenW - pad, 22);
+      ctx.fillText(mins + ':' + secs.toString().padStart(2, '0'), screenW - pad, 22);
     }
 
     // Flag status indicator
@@ -770,12 +1288,12 @@
       ctx.fillStyle = '#66aaff';
       ctx.textAlign = 'right';
       const bf = flags[1];
-      ctx.fillText(bf.carried ? '⚑ STOLEN!' : bf.atBase ? '⚑ Safe' : '⚑ Dropped', screenW - pad, fy);
+      ctx.fillText(bf.carried ? '\u2691 STOLEN!' : bf.atBase ? '\u2691 Safe' : '\u2691 Dropped', screenW - pad, fy);
 
       // Red flag status
       ctx.fillStyle = '#ff7777';
       const rf = flags[2];
-      ctx.fillText(rf.carried ? '⚑ STOLEN!' : rf.atBase ? '⚑ Safe' : '⚑ Dropped', screenW - pad, fy + 16);
+      ctx.fillText(rf.carried ? '\u2691 STOLEN!' : rf.atBase ? '\u2691 Safe' : '\u2691 Dropped', screenW - pad, fy + 16);
     }
 
     // Flag carrying indicator
@@ -785,7 +1303,7 @@
       ctx.textAlign = 'center';
       const pulse = Math.sin(Date.now() * 0.006) * 0.3 + 0.7;
       ctx.globalAlpha = pulse;
-      ctx.fillText('🚩 CARRYING FLAG! Return to base!', screenW / 2, screenH - 30);
+      ctx.fillText('\uD83D\uDEA9 CARRYING FLAG! Return to base!', screenW / 2, screenH - 30);
       ctx.globalAlpha = 1;
     }
 
@@ -795,20 +1313,20 @@
       ctx.font = 'bold 12px monospace';
       ctx.textAlign = 'left';
       const blink = Math.sin(Date.now() * 0.008) > 0;
-      if (blink) ctx.fillText('⚠ LOW FUEL!', pad, screenH - 50);
+      if (blink) ctx.fillText('\u26A0 LOW FUEL!', pad, screenH - 50);
     }
     if (player.ammo < 5 && player.ammo > 0) {
       ctx.fillStyle = '#ff0';
       ctx.font = 'bold 12px monospace';
       ctx.textAlign = 'left';
-      ctx.fillText('⚠ LOW AMMO!', pad, screenH - 35);
+      ctx.fillText('\u26A0 LOW AMMO!', pad, screenH - 35);
     }
     if (player.ammo <= 0) {
       ctx.fillStyle = '#f00';
       ctx.font = 'bold 12px monospace';
       ctx.textAlign = 'left';
       const blink = Math.sin(Date.now() * 0.008) > 0;
-      if (blink) ctx.fillText('⚠ NO AMMO!', pad, screenH - 35);
+      if (blink) ctx.fillText('\u26A0 NO AMMO!', pad, screenH - 35);
     }
 
     // Return to base prompt (when at own base)
@@ -1053,7 +1571,7 @@
 
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 24px monospace';
-    ctx.fillText(`${score.team1} - ${score.team2}`, screenW / 2, screenH / 2 + 10);
+    ctx.fillText(score.team1 + ' - ' + score.team2, screenW / 2, screenH / 2 + 10);
 
     ctx.fillStyle = '#aaa';
     ctx.font = '16px monospace';
@@ -1095,7 +1613,7 @@
 
     ctx.fillStyle = '#ccc';
     ctx.font = '14px monospace';
-    ctx.fillText(`Respawning in ${Math.ceil(timer)}...`, screenW / 2, screenH / 2 + 50);
+    ctx.fillText('Respawning in ' + Math.ceil(timer) + '...', screenW / 2, screenH / 2 + 50);
   }
 
   /* ========== TOUCH JOYSTICK & HUD CONTROLS ========== */
@@ -1238,7 +1756,7 @@
     ctx.fillStyle = 'rgba(255,255,255,0.4)';
     ctx.font = '12px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('⏸', pX + pW / 2, pY + pH / 2 + 4);
+    ctx.fillText('\u23F8', pX + pW / 2, pY + pH / 2 + 4);
 
     input.registerTouchButton({ id: 'pause', x: pX, y: pY, w: pW, h: pH, action: 'pause' });
   }
@@ -1248,7 +1766,7 @@
 
   function notify(text, color, duration) {
     notifications.push({
-      text,
+      text: text,
       color: color || '#fff',
       life: duration || 3,
       maxLife: duration || 3
@@ -1277,6 +1795,41 @@
     }
   }
 
+  /* ========== USERNAME LABEL ========== */
+  function renderUsernameLabel(c, vehicle, camX, camY, username) {
+    if (!vehicle || !vehicle.alive || !username) return;
+    var sx = vehicle.x - camX;
+    var sy = vehicle.y - camY;
+
+    // Position above the vehicle
+    var labelY = sy - 28;
+    var name = username.substring(0, 16);
+
+    c.save();
+    c.font = 'bold 10px monospace';
+    c.textAlign = 'center';
+    var tw = c.measureText(name).width;
+    var padX = 6;
+    var padY = 3;
+    var bgW = tw + padX * 2;
+    var bgH = 14 + padY * 2;
+
+    // Background
+    c.fillStyle = 'rgba(0,0,0,0.55)';
+    c.fillRect(sx - bgW / 2, labelY - bgH / 2, bgW, bgH);
+
+    // Border (team colored)
+    var teamColor = vehicle.team === 1 ? 'rgba(102,170,255,0.5)' : 'rgba(255,119,119,0.5)';
+    c.strokeStyle = teamColor;
+    c.lineWidth = 1;
+    c.strokeRect(sx - bgW / 2, labelY - bgH / 2, bgW, bgH);
+
+    // Text
+    c.fillStyle = vehicle.team === 1 ? '#aaccff' : '#ffaaaa';
+    c.fillText(name, sx, labelY + 4);
+    c.restore();
+  }
+
   /* ========== Helpers ========== */
   let _mouseX = 0, _mouseY = 0;
   function updateMouse() {
@@ -1291,10 +1844,16 @@
 
   function getMenuClick() {
     updateMouse();
-    // Check menu items
-    const startY = 200;
-    for (let i = 0; i < 3; i++) {
-      if (isMouseInRect(screenW / 2 - 160, startY + i * 70 - 5, 320, 50)) {
+    // Check menu items (4 items now)
+    var s = Game.uiScale || 1;
+    var startY = 150 * s;
+    var itemH = 56 * s;
+    var itemGap = 10 * s;
+    var itemW = 340 * s;
+    var cx = screenW / 2;
+    for (var i = 0; i < 4; i++) {
+      var y = startY + i * (itemH + itemGap);
+      if (isMouseInRect(cx - itemW / 2, y, itemW, itemH)) {
         return i;
       }
     }
@@ -1303,6 +1862,10 @@
 
   function getVehicleClick() {
     updateMouse();
+    // Check back button first
+    if (_lastBackBtn && isMouseInRect(_lastBackBtn.x, _lastBackBtn.y, _lastBackBtn.w, _lastBackBtn.h)) {
+      return -2; // special: back
+    }
     // Match bunker bay layout
     const bayW = 150, bayH = 200, bayGap = 20;
     const totalW = 4 * bayW + 3 * bayGap;
@@ -1317,18 +1880,105 @@
 
   function getLobbyAction() {
     updateMouse();
-    const btnY = screenH - 160;
-    if (isMouseInRect(screenW / 2 - 100, btnY, 200, 40)) return 'create';
-    if (isMouseInRect(screenW / 2 - 100, btnY + 50, 200, 40)) return 'refresh';
+    var s = Game.uiScale || 1;
+    var cx = screenW / 2;
 
-    // Check room clicks
-    const rooms = lobbyRooms;
-    const startY = 120;
-    for (let i = 0; i < rooms.length; i++) {
-      if (isMouseInRect(screenW / 2 - 200, startY + i * 40, 400, 35)) {
+    // Check back button
+    if (_lastBackBtn && isMouseInRect(_lastBackBtn.x, _lastBackBtn.y, _lastBackBtn.w, _lastBackBtn.h)) {
+      return 'back';
+    }
+
+    // In-room lobby
+    if (_lobbyData.inRoom) {
+      return _getInRoomLobbyAction(s, cx);
+    }
+
+    // Room browser
+    return _getRoomBrowserAction(s, cx);
+  }
+
+  function _getRoomBrowserAction(s, cx) {
+    // Create room button
+    var btnW = 210 * s;
+    var btnH = 40 * s;
+    var btnY = screenH - 160 * s;
+    if (isMouseInRect(cx - btnW / 2, btnY, btnW, btnH)) return 'create';
+
+    // Refresh button
+    var refY = btnY + btnH + 12 * s;
+    if (isMouseInRect(cx - btnW / 2, refY, btnW, btnH)) return 'refresh';
+
+    // Room clicks
+    var rooms = _lobbyData.rooms && _lobbyData.rooms.length ? _lobbyData.rooms : lobbyRooms;
+    var startY = 105 * s;
+    var roomH = 38 * s;
+    var roomW = 420 * s;
+    for (var i = 0; i < rooms.length; i++) {
+      var y = startY + i * (roomH + 4);
+      if (isMouseInRect(cx - roomW / 2, y, roomW, roomH)) {
         return { action: 'join', index: i };
       }
     }
+    return null;
+  }
+
+  function _getInRoomLobbyAction(s, cx) {
+    var colW = 260 * s;
+    var colGap = 40 * s;
+    var colLeft = cx - colGap / 2 - colW;
+    var colRight = cx + colGap / 2;
+    var slotStartY = 120 * s;
+    var slotH = 42 * s;
+    var slotGap = 6 * s;
+
+    var players = _lobbyData.roomPlayers || [];
+
+    // Check team slot clicks (add AI)
+    for (var team = 1; team <= 2; team++) {
+      var colX = team === 1 ? colLeft : colRight;
+      var teamPlayers = [];
+      for (var p = 0; p < players.length; p++) {
+        if (players[p].team === team) teamPlayers.push(players[p]);
+      }
+      for (var slot = 0; slot < 4; slot++) {
+        var sy = slotStartY + slot * (slotH + slotGap);
+        if (!teamPlayers[slot] && isMouseInRect(colX, sy, colW, slotH)) {
+          return { action: 'addAI', team: team, slot: slot };
+        }
+      }
+    }
+
+    // Button row 1
+    var btnW = 150 * s;
+    var btnH = 38 * s;
+    var btnGap = 14 * s;
+    var btnRow1Y = slotStartY + 4 * (slotH + slotGap) + 16 * s;
+    var btnRow2Y = btnRow1Y + btnH + 10 * s;
+
+    // Ready button
+    var rBtnX = cx - btnW - btnGap / 2;
+    if (isMouseInRect(rBtnX, btnRow1Y, btnW, btnH)) return 'ready';
+
+    // Switch team button
+    var stBtnX = cx + btnGap / 2;
+    if (isMouseInRect(stBtnX, btnRow1Y, btnW, btnH)) return 'switchTeam';
+
+    // Start / Cancel button (host only)
+    if (_lobbyData.isHost) {
+      if (_lobbyData.countdown > 0) {
+        if (isMouseInRect(cx - btnW / 2, btnRow2Y, btnW, btnH)) return 'cancelCountdown';
+      } else {
+        if (isMouseInRect(cx - btnW / 2, btnRow2Y, btnW, btnH)) return 'start';
+      }
+    }
+
+    // Leave room button
+    var leaveW = 130 * s;
+    var leaveH = 34 * s;
+    var leaveX = screenW - leaveW - 16 * s;
+    var leaveY = screenH - leaveH - 16 * s;
+    if (isMouseInRect(leaveX, leaveY, leaveW, leaveH)) return 'leave';
+
     return null;
   }
 
@@ -1406,19 +2056,40 @@
   }
 
   window.Game.UI = {
-    init, resize,
-    renderMenu, renderVehicleSelect, renderLobby, renderHowToPlay,
-    renderHUD, renderGameOver, renderRespawn,
-    renderRoundStats, renderFinalStats,
-    renderTouchControls, renderNotifications,
-    renderPauseOverlay, showPauseOverlay, hidePauseOverlay, isPauseOverlayVisible,
-    getPauseOverlayClick,
-    notify, updateNotifications, updateMouse,
-    getMenuClick, getVehicleClick, getLobbyAction,
-    startElevatorDeploy,
-    set lobbyRooms(v) { lobbyRooms = v; },
-    set lobbyStatus(v) { lobbyStatus = v; },
+    init: init,
+    resize: resize,
+    renderMenu: renderMenu,
+    renderVehicleSelect: renderVehicleSelect,
+    renderLobby: renderLobby,
+    renderHowToPlay: renderHowToPlay,
+    renderSettings: renderSettings,
+    renderHUD: renderHUD,
+    renderGameOver: renderGameOver,
+    renderRespawn: renderRespawn,
+    renderRoundStats: renderRoundStats,
+    renderFinalStats: renderFinalStats,
+    renderTouchControls: renderTouchControls,
+    renderNotifications: renderNotifications,
+    renderPauseOverlay: renderPauseOverlay,
+    showPauseOverlay: showPauseOverlay,
+    hidePauseOverlay: hidePauseOverlay,
+    isPauseOverlayVisible: isPauseOverlayVisible,
+    getPauseOverlayClick: getPauseOverlayClick,
+    renderUsernameLabel: renderUsernameLabel,
+    notify: notify,
+    updateNotifications: updateNotifications,
+    updateMouse: updateMouse,
+    getMenuClick: getMenuClick,
+    getVehicleClick: getVehicleClick,
+    getLobbyAction: getLobbyAction,
+    getSettingsAction: getSettingsAction,
+    getBackClick: getBackClick,
+    startElevatorDeploy: startElevatorDeploy,
+    set lobbyRooms(v) { lobbyRooms = v; if (_lobbyData) _lobbyData.rooms = v; },
+    set lobbyStatus(v) { lobbyStatus = v; if (_lobbyData) _lobbyData.status = v; },
     get selectedMenuItem() { return selectedMenuItem; },
-    set selectedMenuItem(v) { selectedMenuItem = v; }
+    set selectedMenuItem(v) { selectedMenuItem = v; },
+    get username() { return _username; },
+    set username(v) { _username = v || 'Player'; }
   };
 })();
