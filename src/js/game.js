@@ -193,8 +193,12 @@
     const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
     lastTime = timestamp;
 
-    update(dt);
-    render();
+    try {
+      update(dt);
+      render();
+    } catch (err) {
+      console.error('[GameLoop] Error caught — recovering:', err);
+    }
 
     Game.Input.endFrame();
     requestAnimationFrame(gameLoop);
@@ -316,22 +320,8 @@
       const item = Game.UI.getMenuClick();
       if (item >= 0) selectMenuItem(item);
     } else if (state === STATE.VEHICLE_SELECT) {
-      const veh = Game.UI.getVehicleClick();
-      if (veh === -2) {
-        // Back button
-        state = STATE.MENU;
-        Game.Audio.play('click');
-      } else if (veh >= 0 && vehiclePool[veh]) {
-        selectedVehicle = veh;
-        Game.Audio.play('click');
-        if (map) {
-          deployVehicle();
-        } else {
-          Game.UI.startElevatorDeploy(selectedVehicle, function () {
-            startGame();
-          });
-        }
-      }
+      // Vehicle select clicks handled in updateVehicleSelect() via wasClicked().
+      // Don't duplicate here to avoid double-firing deployVehicle().
     } else if (state === STATE.LOBBY) {
       // Lobby clicks are handled in updateLobby() via wasClicked().
       // Don't duplicate here to avoid double-firing actions.
@@ -340,6 +330,9 @@
 
   /* ---------- Vehicle Select ---------- */
   function updateVehicleSelect(dt) {
+    // Don't process any input while elevator deploy animation is running
+    if (Game.UI.isElevatorDeploying()) return;
+
     const trySelect = (type) => {
       if (vehiclePool[type]) {
         selectedVehicle = type;
@@ -381,7 +374,15 @@
     // Touch tap / mouse click on a vehicle bay
     if (Game.Input.wasClicked()) {
       var veh = Game.UI.getVehicleClick();
-      if (veh >= 0 && vehiclePool[veh]) {
+      if (veh === -2) {
+        // Back button
+        if (map) {
+          state = STATE.PLAYING;
+        } else {
+          state = STATE.MENU;
+        }
+        Game.Audio.play('click');
+      } else if (veh >= 0 && vehiclePool[veh]) {
         selectedVehicle = veh;
         Game.Audio.play('click');
         if (map) {
@@ -435,6 +436,10 @@
       });
     }
     allVehicles.push(playerVehicle);
+
+    // Safety: ensure respawn state is fully cleared before entering gameplay
+    isRespawning = false;
+    respawnTimer = 0;
 
     Game.Audio.playMusic(selectedVehicle);
     state = STATE.PLAYING;
@@ -656,26 +661,31 @@
     if (!map) return;
     gameTime += dt;
 
-    // Pause (keyboard + touch)
-    if (Game.Input.wasPressed('Escape') || Game.Input.isPauseRequested()) {
-      if (Game.Input.isTouch) {
-        // On mobile, show pause overlay instead of going to menu
-        Game.UI.showPauseOverlay();
-        return;
-      }
-      state = STATE.MENU;
-      Game.Audio.stopMusic();
+    // Desktop HUD pause button click
+    if (Game.Input.wasClicked() && Game.UI.isHUDPauseClicked && Game.UI.isHUDPauseClicked()) {
+      Game.UI.showPauseOverlay();
       return;
     }
 
-    // Pause overlay handling (mobile)
+    // Pause (keyboard + touch + desktop HUD button)
+    if (Game.Input.wasPressed('Escape') || Game.Input.isPauseRequested()) {
+      Game.UI.showPauseOverlay();
+      return;
+    }
+
+    // Pause overlay handling (all platforms)
     if (Game.UI.isPauseOverlayVisible()) {
       if (Game.Input.wasClicked()) {
         var pauseAction = Game.UI.getPauseOverlayClick();
         if (pauseAction === 'resume') {
           Game.UI.hidePauseOverlay();
+        } else if (pauseAction === 'restart') {
+          Game.UI.hidePauseOverlay();
+          Game.Audio.stopMusic();
+          startRound();
         } else if (pauseAction === 'quit') {
           Game.UI.hidePauseOverlay();
+          map = null;
           state = STATE.MENU;
           Game.Audio.stopMusic();
         } else if (pauseAction === 'music') {
@@ -683,6 +693,10 @@
           Game.UI.notify(on ? 'Music ON' : 'Music OFF', '#aaa', 1.5);
           if (on && playerVehicle) Game.Audio.playMusic(playerVehicle.type);
         }
+      }
+      // Also allow ESC to resume from pause overlay
+      if (Game.Input.wasPressed('Escape')) {
+        Game.UI.hidePauseOverlay();
       }
       return; // Don't process game input while paused
     }
@@ -692,6 +706,18 @@
       const on = Game.Audio.toggleMusic();
       Game.UI.notify(on ? 'Music ON' : 'Music OFF', '#aaa', 1.5);
       if (on && playerVehicle) Game.Audio.playMusic(playerVehicle.type);
+    }
+
+    // Debug cheat keys (development only)
+    if (Game.Input.wasPressed('F1') && playerVehicle && playerVehicle.alive) {
+      console.log('[DEBUG] F1: Kill vehicle. type=' + playerVehicle.type + ' hp=' + playerVehicle.hp + ' jeepLives=' + jeepLives);
+      playerVehicle.takeDamage(999, -1);
+      Game.UI.notify('[DEBUG] Vehicle killed', '#f0f', 2);
+    }
+    if (Game.Input.wasPressed('F2') && playerVehicle && playerVehicle.alive) {
+      console.log('[DEBUG] F2: Drain fuel. type=' + playerVehicle.type + ' fuel=' + playerVehicle.fuel);
+      playerVehicle.fuel = 0;
+      Game.UI.notify('[DEBUG] Fuel drained', '#f0f', 2);
     }
 
     // Handle respawn -> goes to vehicle select quickly
@@ -713,22 +739,13 @@
           vehiclePool[playerVehicle.type] = false;
         }
 
-        // Check if all vehicles destroyed
+        // Check if all vehicles destroyed → round defeat
         var anyAvailable = vehiclePool.some(function (v) { return v; });
         if (!anyAvailable) {
-          // All vehicles destroyed - point to opponent, reset pool
-          score.team2++;
-          recordFlag(2, false);
-          vehiclePool = [true, true, true, true];
-          jeepLives = MAX_JEEP_LIVES;
-          Game.UI.notify('All vehicles lost! Enemy scores!', '#ff4444', 3);
-          Game.Audio.play('score');
-
-          // Check round win
-          if (score.team2 >= WIN_SCORE) {
-            endRound(2);
-            return;
-          }
+          Game.UI.notify('All vehicles destroyed! Defeat!', '#ff4444', 3);
+          Game.Audio.play('explosion');
+          endRound(2);
+          return;
         }
 
         // Go to vehicle select
@@ -736,6 +753,9 @@
         for (var vi = 0; vi < 4; vi++) {
           if (vehiclePool[vi]) { selectedVehicle = vi; break; }
         }
+        return; // CRITICAL: stop processing updatePlaying — without this,
+               // the death check below re-fires (old vehicle is still dead,
+               // isRespawning just became false) creating an infinite death loop
       }
     }
 
@@ -765,6 +785,24 @@
         }
       }
 
+      // UrbanStrike (Helicopter) faces aim direction (strafe movement)
+      if (playerVehicle.type === VEH.HELI) {
+        var heliAim = Game.Input.getAimDirection ? Game.Input.getAimDirection() : null;
+        var heliTargetAngle;
+        if (heliAim) {
+          // Touch: use right joystick direction
+          heliTargetAngle = heliAim.angle;
+        } else {
+          // Desktop: face toward mouse cursor
+          var hMousePos = Game.Input.getMousePos();
+          heliTargetAngle = angleTo(playerVehicle.x, playerVehicle.y, hMousePos.x + camX, hMousePos.y + camY);
+        }
+        var heliDiff = normAngle(heliTargetAngle - playerVehicle.angle);
+        var heliMaxTurn = playerVehicle.turnRate * dt;
+        playerVehicle.angle += clamp(heliDiff, -heliMaxTurn, heliMaxTurn);
+        playerVehicle.angle = normAngle(playerVehicle.angle);
+      }
+
       // Shooting
       if (Game.Input.isShooting()) {
         playerVehicle.shoot();
@@ -787,6 +825,7 @@
         state = STATE.VEHICLE_SELECT;
         var spliceIdx = allVehicles.indexOf(playerVehicle);
         if (spliceIdx !== -1) allVehicles.splice(spliceIdx, 1);
+        return; // Stop processing gameplay after state change
       }
 
       playerVehicle.update(dt, map);
@@ -808,7 +847,11 @@
     if (playerVehicle && !playerVehicle.alive && !isRespawning) {
       isRespawning = true;
       respawnTimer = RESPAWN_TIME;
-      recordDeath(playerVehicle.team, true);
+      // Only record death here if not already recorded by onVehicleHit
+      // (covers fuel=0, water drown, turret kills where no killer vehicle found)
+      if (!playerVehicle._deathRecorded) {
+        recordDeath(playerVehicle.team, true);
+      }
       Game.Audio.stopMusic();
       Game.UI.notify('Vehicle destroyed!', '#ff4444', 2);
     }
@@ -925,8 +968,10 @@
       }
       if (killer) {
         recordKill(killer.team, killer.isPlayer);
-        recordDeath(vehicle.team, vehicle.isPlayer);
       }
+      // Always record death and mark it so respawn detection doesn't double-count
+      recordDeath(vehicle.team, vehicle.isPlayer);
+      vehicle._deathRecorded = true;
       if (killer && killer.isPlayer) {
         Game.UI.notify('Enemy destroyed!', '#ff6600', 2);
         Game.Input.hapticPattern([50, 30, 100]); // kill haptic

@@ -98,6 +98,18 @@
         const veh = vehicles[v];
         if (!veh.alive || veh.id === p.owner) continue;
         if (veh.team === p.team) continue; // no friendly fire
+
+        // UrbanStrike (helicopter) immunity: non-explosive projectiles from
+        // ground vehicles pass through air vehicles. Only explosive ordnance
+        // (shells, rockets, missiles) and air-to-air fire can hit helis.
+        if (veh.flies && !p.explosive) {
+          let shooterFlies = false;
+          for (let sf = 0; sf < vehicles.length; sf++) {
+            if (vehicles[sf].id === p.owner && vehicles[sf].flies) { shooterFlies = true; break; }
+          }
+          if (!shooterFlies) continue;
+        }
+
         if (dist(p.x, p.y, veh.x, veh.y) < veh.hitRadius + p.radius) {
           if (p.explosive) {
             explode(p.x, p.y, p.blastR, p.damage, p.owner, p.team, map, vehicles, onHit);

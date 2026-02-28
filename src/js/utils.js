@@ -53,8 +53,10 @@
   }
   function angleTo(x1, y1, x2, y2) { return Math.atan2(y2 - y1, x2 - x1); }
   function normAngle(a) {
-    while (a > Math.PI) a -= 2 * Math.PI;
-    while (a < -Math.PI) a += 2 * Math.PI;
+    if (!isFinite(a)) return 0;          // guard against Infinity / NaN freeze
+    a = a % (2 * Math.PI);              // reduce to (-2π, 2π) in one step
+    if (a > Math.PI) a -= 2 * Math.PI;
+    if (a < -Math.PI) a += 2 * Math.PI;
     return a;
   }
   function randInt(lo, hi) { return lo + Math.floor(Math.random() * (hi - lo + 1)); }

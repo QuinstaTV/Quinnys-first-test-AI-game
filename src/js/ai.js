@@ -209,6 +209,7 @@
         const targetAngle = angleTo(v.x, v.y, t.x, t.y);
         const diff = normAngle(targetAngle - v.angle);
         v.angle += clamp(diff, -v.turnRate * dt, v.turnRate * dt);
+        v.angle = normAngle(v.angle);
       }
 
       // Shoot with some inaccuracy based on difficulty
@@ -281,6 +282,12 @@
       if (nearestEnemy && dist(v.x, v.y, nearestEnemy.x, nearestEnemy.y) < 300) {
         if (v.type === VEH.TANK) {
           v.aimTurret(nearestEnemy.x, nearestEnemy.y);
+        } else if (v.type === VEH.HELI) {
+          // Heli must face enemy to shoot (body aim, same as doAttack)
+          const targetAngle = angleTo(v.x, v.y, nearestEnemy.x, nearestEnemy.y);
+          const aDiff = normAngle(targetAngle - v.angle);
+          v.angle += clamp(aDiff, -v.turnRate * dt, v.turnRate * dt);
+          v.angle = normAngle(v.angle);
         }
         const aimAngle = angleTo(v.x, v.y, nearestEnemy.x, nearestEnemy.y);
         const diff = normAngle(aimAngle - (v.type === VEH.TANK ? v.turretAngle : v.angle));
@@ -317,6 +324,15 @@
       const dx = Math.cos(angle);
       const dy = Math.sin(angle);
       v.move(dx, dy, dt, this.map);
+
+      // AI helicopters face movement direction (player helis face aim direction
+      // via game.js, but AI needs explicit rotation since Vehicle.move skips it)
+      if (v.type === VEH.HELI) {
+        const diff = normAngle(angle - v.angle);
+        const maxTurn = v.turnRate * dt;
+        v.angle += clamp(diff, -maxTurn, maxTurn);
+        v.angle = normAngle(v.angle);
+      }
     }
 
     moveAway(tx, ty, dt) {
@@ -325,6 +341,14 @@
       const dx = Math.cos(angle);
       const dy = Math.sin(angle);
       v.move(dx, dy, dt, this.map);
+
+      // AI helicopters face movement direction
+      if (v.type === VEH.HELI) {
+        const diff = normAngle(angle - v.angle);
+        const maxTurn = v.turnRate * dt;
+        v.angle += clamp(diff, -maxTurn, maxTurn);
+        v.angle = normAngle(v.angle);
+      }
     }
 
     computePath(targetTX, targetTY) {

@@ -121,6 +121,12 @@
         }
       }
 
+      // Clear crash state if fuel was restored (e.g. refuelled at depot mid-crash)
+      if (this.fuel > 0 && this.isCrashing) {
+        this.isCrashing = false;
+        this.crashTimer = 0;
+      }
+
       // All vehicles explode when fuel reaches 0
       if (this.fuel <= 0) {
         if (this.type === VEH.HELI) {
@@ -137,7 +143,7 @@
           // Crash after 3 seconds
           if (this.crashTimer >= 3.0) {
             this.takeDamage(999, -1);
-            Game.Particles.explosion(this.x, this.y, 2, 20);
+            // die() handles explosion particles + SFX + screenshake
           }
         } else {
           // Ground vehicles: immediate explosion on fuel=0
@@ -153,7 +159,7 @@
           // Explode after 2 seconds
           if (this.crashTimer >= 2.0) {
             this.takeDamage(999, -1);
-            Game.Particles.explosion(this.x, this.y, 2, 20);
+            // die() handles explosion particles + SFX + screenshake
           }
         }
       }
@@ -215,11 +221,15 @@
         const moveY = normDy * speed;
 
         // Rotate body towards movement direction (visual)
-        const targetAngle = Math.atan2(dy, dx);
-        const diff = normAngle(targetAngle - this.angle);
-        const maxTurn = this.turnRate * dt;
-        this.angle += clamp(diff, -maxTurn, maxTurn);
-        this.angle = normAngle(this.angle);
+        // UrbanStrike (helicopter) faces its aim direction instead, allowing
+        // strafing movement (move backward/sideways without turning)
+        if (this.type !== VEH.HELI) {
+          const targetAngle = Math.atan2(dy, dx);
+          const diff = normAngle(targetAngle - this.angle);
+          const maxTurn = this.turnRate * dt;
+          this.angle += clamp(diff, -maxTurn, maxTurn);
+          this.angle = normAngle(this.angle);
+        }
 
         // Collision check
         const newX = this.x + moveX;
@@ -406,6 +416,14 @@
       const sx = this.x - camX;
       const sy = this.y - camY;
 
+      // Helicopter shadow (drawn first so it appears beneath the body)
+      if (this.type === VEH.HELI) {
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.beginPath();
+        ctx.ellipse(sx + 5, sy + 8, 12, 8, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
       ctx.save();
       ctx.translate(sx, sy);
       ctx.rotate(this.angle + Math.PI / 2); // sprites face up by default
@@ -428,7 +446,7 @@
         ctx.restore();
       }
 
-      // Helicopter rotor
+      // Helicopter rotor (shadow already drawn before body)
       if (this.type === VEH.HELI) {
         ctx.save();
         ctx.translate(sx, sy);
@@ -440,12 +458,6 @@
         ctx.moveTo(0, -16); ctx.lineTo(0, 16);
         ctx.stroke();
         ctx.restore();
-
-        // Shadow
-        ctx.fillStyle = 'rgba(0,0,0,0.2)';
-        ctx.beginPath();
-        ctx.ellipse(sx + 5, sy + 8, 12, 8, 0.3, 0, Math.PI * 2);
-        ctx.fill();
       }
 
       // Flag indicator

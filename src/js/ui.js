@@ -1449,6 +1449,26 @@
       ctx.fillText(mins + ':' + secs.toString().padStart(2, '0'), screenW - pad, 22);
     }
 
+    // Pause button (desktop HUD - top right, below timer)
+    // On touch devices the touch controls render their own pause button
+    if (!Game.Input.isTouch) {
+      var pbX = screenW - 42;
+      var pbY = 28;
+      var pbW = 32, pbH = 24;
+      var pbHover = isMouseInRect(pbX, pbY, pbW, pbH);
+      ctx.fillStyle = pbHover ? 'rgba(255,102,0,0.4)' : 'rgba(255,255,255,0.08)';
+      ctx.fillRect(pbX, pbY, pbW, pbH);
+      ctx.strokeStyle = pbHover ? '#ff6600' : 'rgba(255,255,255,0.2)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(pbX, pbY, pbW, pbH);
+      // Pause icon (two bars)
+      ctx.fillStyle = pbHover ? '#ff6600' : 'rgba(255,255,255,0.5)';
+      ctx.fillRect(pbX + 10, pbY + 5, 4, 14);
+      ctx.fillRect(pbX + 18, pbY + 5, 4, 14);
+      // Store button rect for click detection
+      _pauseButtonRect = { x: pbX, y: pbY, w: pbW, h: pbH };
+    }
+
     // Flag status indicator
     if (flags) {
       const fy = 55;
@@ -2167,12 +2187,19 @@
     return null;
   }
 
-  /* ========== Pause/Exit Overlay (mobile) ========== */
+  /* ========== Pause/Exit Overlay (all platforms) ========== */
   var pauseOverlayVisible = false;
+  var _pauseButtonRect = null; // desktop HUD pause button rect
 
   function showPauseOverlay() { pauseOverlayVisible = true; }
   function hidePauseOverlay() { pauseOverlayVisible = false; }
   function isPauseOverlayVisible() { return pauseOverlayVisible; }
+
+  function isHUDPauseClicked() {
+    if (!_pauseButtonRect) return false;
+    updateMouse();
+    return isMouseInRect(_pauseButtonRect.x, _pauseButtonRect.y, _pauseButtonRect.w, _pauseButtonRect.h);
+  }
 
   function renderPauseOverlay() {
     if (!pauseOverlayVisible) return;
@@ -2186,11 +2213,11 @@
     ctx.fillStyle = '#ff6600';
     ctx.font = 'bold 28px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('PAUSED', cx, cy - 80);
+    ctx.fillText('PAUSED', cx, cy - 110);
 
     // Resume button
     var btnW = 200, btnH = 50;
-    var resumeY = cy - 30;
+    var resumeY = cy - 60;
     var hover1 = isMouseInRect(cx - btnW / 2, resumeY, btnW, btnH);
     ctx.fillStyle = hover1 ? '#ff6600' : 'rgba(255,102,0,0.3)';
     ctx.fillRect(cx - btnW / 2, resumeY, btnW, btnH);
@@ -2201,10 +2228,22 @@
     ctx.font = 'bold 18px monospace';
     ctx.fillText('RESUME', cx, resumeY + 32);
 
+    // Restart Round button
+    var restartY = resumeY + 60;
+    var hover2 = isMouseInRect(cx - btnW / 2, restartY, btnW, btnH);
+    ctx.fillStyle = hover2 ? '#cc8800' : 'rgba(200,130,0,0.3)';
+    ctx.fillRect(cx - btnW / 2, restartY, btnW, btnH);
+    ctx.strokeStyle = '#cc8800';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(cx - btnW / 2, restartY, btnW, btnH);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText('RESTART ROUND', cx, restartY + 32);
+
     // Quit button
-    var quitY = resumeY + 70;
-    var hover2 = isMouseInRect(cx - btnW / 2, quitY, btnW, btnH);
-    ctx.fillStyle = hover2 ? '#cc2222' : 'rgba(200,30,30,0.3)';
+    var quitY = restartY + 60;
+    var hover3 = isMouseInRect(cx - btnW / 2, quitY, btnW, btnH);
+    ctx.fillStyle = hover3 ? '#cc2222' : 'rgba(200,30,30,0.3)';
     ctx.fillRect(cx - btnW / 2, quitY, btnW, btnH);
     ctx.strokeStyle = '#cc2222';
     ctx.lineWidth = 2;
@@ -2214,9 +2253,9 @@
     ctx.fillText('QUIT TO MENU', cx, quitY + 32);
 
     // Toggle music button
-    var musicY = quitY + 70;
-    var hover3 = isMouseInRect(cx - btnW / 2, musicY, btnW, btnH);
-    ctx.fillStyle = hover3 ? '#336699' : 'rgba(50,100,150,0.3)';
+    var musicY = quitY + 60;
+    var hover4 = isMouseInRect(cx - btnW / 2, musicY, btnW, btnH);
+    ctx.fillStyle = hover4 ? '#336699' : 'rgba(50,100,150,0.3)';
     ctx.fillRect(cx - btnW / 2, musicY, btnW, btnH);
     ctx.strokeStyle = '#336699';
     ctx.lineWidth = 1;
@@ -2231,10 +2270,12 @@
     var cx = screenW / 2;
     var cy = screenH / 2;
     var btnW = 200, btnH = 50;
-    var resumeY = cy - 30;
-    var quitY = resumeY + 70;
-    var musicY = quitY + 70;
+    var resumeY = cy - 60;
+    var restartY = resumeY + 60;
+    var quitY = restartY + 60;
+    var musicY = quitY + 60;
     if (isMouseInRect(cx - btnW / 2, resumeY, btnW, btnH)) return 'resume';
+    if (isMouseInRect(cx - btnW / 2, restartY, btnW, btnH)) return 'restart';
     if (isMouseInRect(cx - btnW / 2, quitY, btnW, btnH)) return 'quit';
     if (isMouseInRect(cx - btnW / 2, musicY, btnW, btnH)) return 'music';
     return null;
@@ -2260,6 +2301,7 @@
     hidePauseOverlay: hidePauseOverlay,
     isPauseOverlayVisible: isPauseOverlayVisible,
     getPauseOverlayClick: getPauseOverlayClick,
+    isHUDPauseClicked: isHUDPauseClicked,
     renderUsernameLabel: renderUsernameLabel,
     notify: notify,
     updateNotifications: updateNotifications,
@@ -2270,6 +2312,7 @@
     getSettingsAction: getSettingsAction,
     getBackClick: getBackClick,
     startElevatorDeploy: startElevatorDeploy,
+    isElevatorDeploying: function() { return elevatorPhase === 'deploying'; },
     set lobbyRooms(v) { lobbyRooms = v; if (_lobbyData) _lobbyData.rooms = v; },
     set lobbyStatus(v) { lobbyStatus = v; if (_lobbyData) _lobbyData.status = v; },
     get selectedMenuItem() { return selectedMenuItem; },
