@@ -69,22 +69,24 @@ describe('All vehicles destroyed = round defeat', () => {
 // 2. URBANSTRIKE IMMUNE TO GROUND FIRE
 // ============================================================
 describe('UrbanStrike immune to non-explosive ground fire', () => {
-  test('projectiles.js has air vehicle immunity check', () => {
+  test('projectiles.js has air vehicle immunity check for ALL ground fire', () => {
     const projSrc = fs.readFileSync(path.join(__dirname, '../src/js/projectiles.js'), 'utf8');
-    expect(projSrc).toContain('veh.flies && !p.explosive');
-    expect(projSrc).toContain('shooterFlies');
+    // New: ALL ground vehicle projectiles are blocked, not just non-explosive
+    expect(projSrc).toContain('if (veh.flies)');
+    expect(projSrc).toContain('shooterIsGroundVehicle');
   });
 
-  test('non-explosive bullets from ground vehicles skip flying targets', () => {
+  test('ALL projectiles from ground vehicles skip flying targets', () => {
     const projSrc = fs.readFileSync(path.join(__dirname, '../src/js/projectiles.js'), 'utf8');
-    // Verify the logic: if target flies AND projectile is not explosive AND shooter doesn't fly, continue
-    expect(projSrc).toContain("if (!shooterFlies) continue;");
+    // Verify the logic: if target flies AND shooter is ground vehicle, continue
+    expect(projSrc).toContain('if (shooterIsGroundVehicle) continue;');
   });
 
-  test('explosive projectiles still hit flying vehicles', () => {
+  test('turret fire can still hit flying vehicles (turrets are not vehicles)', () => {
     const projSrc = fs.readFileSync(path.join(__dirname, '../src/js/projectiles.js'), 'utf8');
-    // The check is `if (veh.flies && !p.explosive)` - explosive projectiles skip this check
-    expect(projSrc).toMatch(/veh\.flies && !p\.explosive/);
+    // The shooterIsGroundVehicle check only matches when the owner IS in vehicles[]
+    // Turrets have negative IDs not in the vehicles array, so they bypass immunity
+    expect(projSrc).toContain('vehicles[sf].id === p.owner');
   });
 
   test('heli-to-heli combat still works (air-to-air)', () => {
@@ -147,8 +149,8 @@ describe('UrbanStrike immune to non-explosive ground fire', () => {
     Game.Projectiles.clear();
   });
 
-  // Functional test: shell hitting heli
-  test('shell from BushMaster DOES damage heli (functional)', () => {
+  // Functional test: shell from tank does NOT damage heli (full ground immunity)
+  test('shell from BushMaster does NOT damage heli (full ground immunity)', () => {
     Game.Projectiles.clear();
     const heli = Game.createVehicle(Game.VEH.HELI, 2, 100, 100);
     const tank = Game.createVehicle(Game.VEH.TANK, 1, 100, 80);
@@ -166,8 +168,29 @@ describe('UrbanStrike immune to non-explosive ground fire', () => {
     for (let i = 0; i < 30; i++) {
       Game.Projectiles.update(0.016, mapStub, vehicles, () => {});
     }
-    // Heli SHOULD have taken explosive damage (from blast or direct hit)
-    expect(heli.hp).toBeLessThan(startHp);
+    // Heli should NOT have taken any damage from ground vehicle fire
+    expect(heli.hp).toBe(startHp);
+    Game.Projectiles.clear();
+  });
+
+  // Functional test: blast radius from ground vehicle does NOT damage heli
+  test('explosion blast from ground vehicle does NOT damage heli', () => {
+    Game.Projectiles.clear();
+    const heli = Game.createVehicle(Game.VEH.HELI, 2, 120, 100);
+    const tank = Game.createVehicle(Game.VEH.TANK, 1, 100, 100);
+    const vehicles = [tank, heli];
+
+    const mapStub = {
+      worldW: 2000, worldH: 2000,
+      getTile: () => 0,
+      destroyTile: () => false
+    };
+
+    const startHp = heli.hp;
+    // Simulate explosion at tank position (blast should reach heli at 20px away)
+    Game.Projectiles.explode(100, 100, 50, 40, tank.id, 1, mapStub, vehicles, () => {});
+    // Heli should NOT have taken blast damage from ground vehicle
+    expect(heli.hp).toBe(startHp);
     Game.Projectiles.clear();
   });
 });
@@ -333,7 +356,8 @@ describe('Pause menu (desktop + mobile, restart round)', () => {
     // The old code had: if (Game.Input.isTouch) { showPauseOverlay } else { state = STATE.MENU }
     // Now it should always show pause overlay
     expect(gameSrc).not.toContain('if (Game.Input.isTouch) {\n        // On mobile, show pause overlay');
-    expect(gameSrc).toContain("Game.UI.showPauseOverlay();\n      return;\n    }\n\n    // Pause overlay handling (all platforms)");
+    expect(gameSrc).toContain('Game.UI.showPauseOverlay()');
+    expect(gameSrc).toContain('// Pause overlay handling (all platforms)');
   });
 
   test('pause overlay has Restart Round option', () => {
@@ -367,11 +391,12 @@ describe('Pause menu (desktop + mobile, restart round)', () => {
     expect(gameSrc).toContain('Game.UI.isHUDPauseClicked()');
   });
 
-  test('ESC can also resume from pause overlay', () => {
+  test('ESC toggles pause: hides overlay when visible', () => {
     const gameSrc = fs.readFileSync(path.join(__dirname, '../src/js/game.js'), 'utf8');
-    // Within the pause overlay handling block
-    expect(gameSrc).toContain("// Also allow ESC to resume from pause overlay");
-    expect(gameSrc).toContain("Game.UI.hidePauseOverlay()");
+    // ESC handler toggles: if overlay visible, hide it; else show it
+    expect(gameSrc).toContain('Game.UI.hidePauseOverlay()');
+    // The primary ESC handler has an if/else to toggle
+    expect(gameSrc).toContain('if (Game.UI.isPauseOverlayVisible())');
   });
 });
 

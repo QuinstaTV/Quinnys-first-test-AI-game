@@ -99,15 +99,19 @@
         if (!veh.alive || veh.id === p.owner) continue;
         if (veh.team === p.team) continue; // no friendly fire
 
-        // UrbanStrike (helicopter) immunity: non-explosive projectiles from
-        // ground vehicles pass through air vehicles. Only explosive ordnance
-        // (shells, rockets, missiles) and air-to-air fire can hit helis.
-        if (veh.flies && !p.explosive) {
-          let shooterFlies = false;
+        // UrbanStrike (helicopter) immunity: ALL ground-vehicle projectiles
+        // (bullets, shells, rockets) pass through air vehicles.  Only air-to-air
+        // fire can hit helis.  Turrets (owner id < 0, not in vehicles[]) are
+        // ground defences and CAN still damage helicopters.
+        if (veh.flies) {
+          let shooterIsGroundVehicle = false;
           for (let sf = 0; sf < vehicles.length; sf++) {
-            if (vehicles[sf].id === p.owner && vehicles[sf].flies) { shooterFlies = true; break; }
+            if (vehicles[sf].id === p.owner) {
+              if (!vehicles[sf].flies) shooterIsGroundVehicle = true;
+              break;
+            }
           }
-          if (!shooterFlies) continue;
+          if (shooterIsGroundVehicle) continue;
         }
 
         if (dist(p.x, p.y, veh.x, veh.y) < veh.hitRadius + p.radius) {
@@ -177,6 +181,20 @@
       const veh = vehicles[v];
       if (!veh.alive || veh.id === owner) continue;
       if (veh.team === team && team !== 0) continue; // no friendly fire
+
+      // Helicopter immunity: blast from ground-vehicle explosions cannot
+      // hurt flying vehicles (turret blasts, owner<0, still apply).
+      if (veh.flies) {
+        let ownerIsGroundVehicle = false;
+        for (let ov = 0; ov < vehicles.length; ov++) {
+          if (vehicles[ov].id === owner) {
+            if (!vehicles[ov].flies) ownerIsGroundVehicle = true;
+            break;
+          }
+        }
+        if (ownerIsGroundVehicle) continue;
+      }
+
       const d = dist(x, y, veh.x, veh.y);
       if (d < blastR) {
         const falloff = 1 - (d / blastR);

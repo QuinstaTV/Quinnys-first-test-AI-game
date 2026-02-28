@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  const { STATE, VEH, T, TILE, dist, angleTo, clamp, randFloat } = Game;
+  const { STATE, VEH, T, TILE, dist, angleTo, normAngle, clamp, randFloat } = Game;
 
   let canvas, ctx;
   let state = STATE.MENU;
@@ -659,17 +659,20 @@
   /* ---------- Playing ---------- */
   function updatePlaying(dt) {
     if (!map) return;
-    gameTime += dt;
 
-    // Desktop HUD pause button click
-    if (Game.Input.wasClicked() && Game.UI.isHUDPauseClicked && Game.UI.isHUDPauseClicked()) {
+    // Desktop HUD pause button click (only when overlay is NOT already showing)
+    if (!Game.UI.isPauseOverlayVisible() && Game.Input.wasClicked() && Game.UI.isHUDPauseClicked && Game.UI.isHUDPauseClicked()) {
       Game.UI.showPauseOverlay();
       return;
     }
 
     // Pause (keyboard + touch + desktop HUD button)
     if (Game.Input.wasPressed('Escape') || Game.Input.isPauseRequested()) {
-      Game.UI.showPauseOverlay();
+      if (Game.UI.isPauseOverlayVisible()) {
+        Game.UI.hidePauseOverlay();
+      } else {
+        Game.UI.showPauseOverlay();
+      }
       return;
     }
 
@@ -694,12 +697,11 @@
           if (on && playerVehicle) Game.Audio.playMusic(playerVehicle.type);
         }
       }
-      // Also allow ESC to resume from pause overlay
-      if (Game.Input.wasPressed('Escape')) {
-        Game.UI.hidePauseOverlay();
-      }
       return; // Don't process game input while paused
     }
+
+    // Game timer only advances while NOT paused
+    gameTime += dt;
 
     // Toggle music
     if (Game.Input.wasPressed('KeyM')) {
@@ -839,6 +841,12 @@
         }
       } else {
         fuelWarnTimer = 0;
+      }
+
+      // Fuel stall warning: ground vehicles can't move when fuel=0
+      if (playerVehicle.fuel <= 0 && !playerVehicle.flies && !playerVehicle._stallNotified) {
+        Game.UI.notify('OUT OF FUEL — STALLING!', '#ff4444', 2);
+        playerVehicle._stallNotified = true;
       }
     }
 
