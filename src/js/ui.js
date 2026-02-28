@@ -36,8 +36,11 @@
   function init(c) {
     canvas = c;
     ctx = c.getContext('2d');
-    screenW = c.width;
-    screenH = c.height;
+    // Use CSS-pixel viewport dimensions, not the DPR-scaled backing store
+    // (canvas.width includes the devicePixelRatio multiplier and would make
+    // all UI coordinates 2× off on high-DPI screens until the first resize).
+    screenW = Game.screenW || window.innerWidth;
+    screenH = Game.screenH || window.innerHeight;
   }
 
   function resize(w, h) {
@@ -527,6 +530,18 @@
       };
     }
 
+    // Sync _lobbyData so getLobbyAction() sees current state
+    _lobbyData.inRoom = lobbyData.inRoom || false;
+    _lobbyData.roomPlayers = lobbyData.roomPlayers || [];
+    _lobbyData.playerTeam = lobbyData.playerTeam || 1;
+    _lobbyData.isHost = lobbyData.isHost || false;
+    _lobbyData.countdown = lobbyData.countdown || 0;
+    _lobbyData.readyStates = lobbyData.readyStates || {};
+    _lobbyData.roomName = lobbyData.roomName || '';
+    _lobbyData.playerId = lobbyData.playerId || '';
+    if (lobbyData.rooms) _lobbyData.rooms = lobbyData.rooms;
+    if (lobbyData.status !== undefined) _lobbyData.status = lobbyData.status;
+
     // If in a room, show the full lobby screen
     if (lobbyData.inRoom) {
       _renderInRoomLobby(lobbyData);
@@ -716,21 +731,28 @@
           ctx.font = 'bold ' + Math.round(13 * s) + 'px monospace';
           ctx.textAlign = 'left';
           var nameStr = player.name || (player.isAI ? 'AI Bot' : 'Player');
-          ctx.fillText(nameStr, colX + 12 * s, sy + slotH / 2 + 2 * s);
+          ctx.fillText(nameStr, colX + 12 * s, sy + slotH / 2 - 2 * s);
+
+          // Vehicle type label
+          var vehNames = ['Jeep', 'BushMaster', 'UrbanStrike', 'StrikeMaster'];
+          var vehLabel = vehNames[player.vehicleType] || vehNames[0];
+          ctx.fillStyle = '#8a9a6a';
+          ctx.font = Math.round(10 * s) + 'px monospace';
+          ctx.fillText(vehLabel, colX + 12 * s, sy + slotH / 2 + 12 * s);
 
           // Ready indicator
           var isReady = readyStates[player.id] || player.ready || false;
           ctx.fillStyle = isReady ? '#44cc44' : '#cc4444';
           ctx.font = 'bold ' + Math.round(14 * s) + 'px monospace';
           ctx.textAlign = 'right';
-          ctx.fillText(isReady ? '\u2713' : '\u2717', colX + colW - 12 * s, sy + slotH / 2 + 4 * s);
+          ctx.fillText(isReady ? '\u2713 READY' : '\u2717', colX + colW - 12 * s, sy + slotH / 2 + 4 * s);
 
           // AI label
           if (player.isAI) {
             ctx.fillStyle = '#887744';
             ctx.font = Math.round(9 * s) + 'px monospace';
-            ctx.textAlign = 'left';
-            ctx.fillText('AI', colX + 12 * s, sy + slotH / 2 + 14 * s);
+            ctx.textAlign = 'right';
+            ctx.fillText('[BOT]', colX + colW - 12 * s, sy + slotH / 2 + 14 * s);
           }
         } else {
           // Empty slot
@@ -742,12 +764,59 @@
       }
     }
 
-    // Buttons row at bottom
+    // ───── VEHICLE SELECTION ROW ─────
+    var vehRowY = slotStartY + 4 * (slotH + slotGap) + 8 * s;
+    var vehNames = ['JEEP', 'BUSHMASTER', 'URBANSTRIKE', 'STRIKEMASTER'];
+    var vehBtnW = 110 * s;
+    var vehBtnH = 34 * s;
+    var vehBtnGap = 8 * s;
+    var vehTotalW = 4 * vehBtnW + 3 * vehBtnGap;
+    var vehStartX = cx - vehTotalW / 2;
+
+    // Section label
+    ctx.fillStyle = '#8a9a6a';
+    ctx.font = 'bold ' + Math.round(11 * s) + 'px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('SELECT YOUR VEHICLE', cx, vehRowY - 2 * s);
+
+    // Find current player's vehicle selection from lobby data
+    var currentVehType = 0;
+    for (var pv = 0; pv < players.length; pv++) {
+      if (players[pv].id === lobbyData.playerId) {
+        currentVehType = players[pv].vehicleType || 0;
+        break;
+      }
+    }
+
+    for (var vIdx = 0; vIdx < 4; vIdx++) {
+      var vx = vehStartX + vIdx * (vehBtnW + vehBtnGap);
+      var isCurrentVeh = vIdx === currentVehType;
+      var vHover = isMouseInRect(vx, vehRowY + 4 * s, vehBtnW, vehBtnH);
+
+      ctx.fillStyle = isCurrentVeh ? 'rgba(255,102,0,0.2)' : (vHover ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.03)');
+      ctx.fillRect(vx, vehRowY + 4 * s, vehBtnW, vehBtnH);
+      ctx.strokeStyle = isCurrentVeh ? '#ff6600' : (vHover ? '#888' : '#4a5a3a');
+      ctx.lineWidth = isCurrentVeh ? 2 : 1;
+      ctx.strokeRect(vx, vehRowY + 4 * s, vehBtnW, vehBtnH);
+
+      ctx.fillStyle = isCurrentVeh ? '#ff6600' : (vHover ? '#ccc' : '#888');
+      ctx.font = 'bold ' + Math.round(10 * s) + 'px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(vehNames[vIdx], vx + vehBtnW / 2, vehRowY + 4 * s + vehBtnH / 2 + 4 * s);
+    }
+
+    // ───── ACTION BUTTONS (grouped) ─────
     var btnW = 150 * s;
     var btnH = 38 * s;
     var btnGap = 14 * s;
-    var btnRow1Y = slotStartY + 4 * (slotH + slotGap) + 16 * s;
+    var btnRow1Y = vehRowY + vehBtnH + 22 * s;
     var btnRow2Y = btnRow1Y + btnH + 10 * s;
+
+    // Section label
+    ctx.fillStyle = '#4a5a3a';
+    ctx.font = Math.round(10 * s) + 'px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('── ACTIONS ──', cx, btnRow1Y - 6 * s);
 
     // --- READY / NOT READY toggle ---
     var rBtnX = cx - btnW - btnGap / 2;
@@ -774,7 +843,7 @@
     ctx.fillStyle = '#fff';
     ctx.fillText('SWITCH TEAM', stBtnX + btnW / 2, btnRow1Y + btnH / 2 + 5 * s);
 
-    // Row 2 buttons
+    // Row 2 buttons (host: START/CANCEL)
     if (lobbyData.isHost) {
       // START GAME button (host only)
       var allReady = true;
@@ -1128,42 +1197,143 @@
   }
 
   function renderHowToPlayDesktop() {
-    var lines = [
-      '',
-      '\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557',
-      '\u2551  OBJECTIVE: Capture the enemy flag and   \u2551',
-      '\u2551  return it to your base. First to 3 wins!\u2551',
-      '\u2560\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2563',
-      '\u2551                                          \u2551',
-      '\u2551  CONTROLS:                               \u2551',
-      '\u2551  WASD / Arrow Keys ... Move vehicle      \u2551',
-      '\u2551  Mouse / Space ....... Shoot             \u2551',
-      '\u2551  E ........... Lay mine (StrikeMaster)   \u2551',
-      '\u2551  R ................... Swap vehicle       \u2551',
-      '\u2551  M ................... Toggle music       \u2551',
-      '\u2551  ESC ................. Pause / Menu       \u2551',
-      '\u2551                                          \u2551',
-      '\u2551  TIPS:                                   \u2551',
-      '\u2551  \u2022 Only JEEP can carry the flag!         \u2551',
-      '\u2551  \u2022 Vehicles have limited fuel & ammo     \u2551',
-      '\u2551  \u2022 Return to base or depots to resupply  \u2551',
-      '\u2551  \u2022 Destroy walls to create new paths     \u2551',
-      '\u2551  \u2022 UrbanStrike flies over everything     \u2551',
-      '\u2551  \u2022 StrikeMaster can lay mines behind it  \u2551',
-      '\u2551  \u2022 BushMaster turret auto-aims enemies   \u2551',
-      '\u2551  \u2022 Jeep has 3 respawn lives per round    \u2551',
-      '\u2551                                          \u2551',
-      '\u255A\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255D',
-      '',
-      'Press any key to return to menu'
+    var cx = screenW / 2;
+    var topY = 70;
+
+    // --- Objective banner ---
+    ctx.fillStyle = '#ffcc00';
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Capture the enemy flag & return it to your base!', cx, topY);
+    ctx.fillStyle = '#aaa';
+    ctx.font = '12px monospace';
+    ctx.fillText('First to 3 captures wins the round.', cx, topY + 18);
+
+    // --- Controls panel ---
+    var panelW = Math.min(screenW - 60, 500);
+    var panelX = cx - panelW / 2;
+    var panelY = topY + 42;
+    var panelH = 195;
+
+    ctx.fillStyle = 'rgba(40,40,40,0.8)';
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, panelX, panelY, panelW, panelH, 10);
+    ctx.fill();
+    ctx.stroke();
+
+    // Section header
+    ctx.fillStyle = '#ff6600';
+    ctx.font = 'bold 13px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('CONTROLS', cx, panelY + 22);
+
+    // Key helper: draws a rounded key cap
+    function drawKey(x, y, label, w) {
+      var kw = w || 36;
+      var kh = 24;
+      ctx.fillStyle = 'rgba(80,80,80,0.9)';
+      roundRect(ctx, x - kw / 2, y - kh / 2, kw, kh, 5);
+      ctx.fill();
+      ctx.strokeStyle = '#888';
+      ctx.lineWidth = 1;
+      roundRect(ctx, x - kw / 2, y - kh / 2, kw, kh, 5);
+      ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, x, y + 4);
+    }
+
+    // --- WASD cluster (left side) ---
+    var kx = panelX + panelW * 0.2;
+    var ky = panelY + 65;
+    drawKey(kx, ky - 28, 'W');
+    drawKey(kx - 40, ky, 'A');
+    drawKey(kx, ky, 'S');
+    drawKey(kx + 40, ky, 'D');
+    ctx.fillStyle = '#66aaff';
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('MOVE', kx, ky + 24);
+
+    // --- Mouse + Space (right side: shoot) ---
+    var mx = panelX + panelW * 0.65;
+    var my = panelY + 55;
+    // Mouse icon
+    ctx.strokeStyle = '#ff5555';
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, mx - 14, my - 18, 28, 36, 8);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(mx, my - 18); ctx.lineTo(mx, my - 4);
+    ctx.moveTo(mx - 14, my - 4); ctx.lineTo(mx + 14, my - 4);
+    ctx.strokeStyle = '#ff5555';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // Click highlight
+    ctx.fillStyle = 'rgba(255,85,85,0.3)';
+    roundRect(ctx, mx - 13, my - 17, 12, 12, 4);
+    ctx.fill();
+    // or SPACE key
+    ctx.fillStyle = '#aaa';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('or', mx, my + 28);
+    drawKey(mx, my + 44, 'SPACE', 54);
+    ctx.fillStyle = '#ff5555';
+    ctx.font = 'bold 11px monospace';
+    ctx.fillText('SHOOT', mx, my + 66);
+
+    // --- Other keys (bottom row inside panel) ---
+    var rowY = panelY + 145;
+    var colSpan = panelW / 5;
+    var keys = [
+      { key: 'E', label: 'MINE', color: '#ffaa00' },
+      { key: 'R', label: 'SWAP', color: '#44cc44' },
+      { key: 'M', label: 'MUSIC', color: '#66aaff' },
+      { key: 'ESC', label: 'PAUSE', color: '#aaa' }
+    ];
+    keys.forEach(function (k, i) {
+      var bx = panelX + colSpan * (i + 0.7);
+      drawKey(bx, rowY, k.key, k.key.length > 1 ? 42 : 36);
+      ctx.fillStyle = k.color;
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(k.label, bx, rowY + 20);
+    });
+
+    // --- Tips list ---
+    var tipY = panelY + panelH + 24;
+    var tips = [
+      { icon: '\uD83C\uDFC1', text: 'Only JEEP can carry the flag!' },
+      { icon: '\u26FD', text: 'Vehicles have limited fuel & ammo' },
+      { icon: '\uD83D\uDD27', text: 'Return to base or depots to resupply' },
+      { icon: '\uD83D\uDCA5', text: 'Destroy walls to create shortcuts' },
+      { icon: '\uD83D\uDE81', text: 'UrbanStrike flies over everything' },
+      { icon: '\uD83D\uDCA3', text: 'StrikeMaster can lay mines behind it' },
+      { icon: '\uD83D\uDD2B', text: 'BushMaster turret auto-aims enemies' },
+      { icon: '\u2764\uFE0F', text: 'Jeep has 3 respawn lives per round' }
     ];
 
-    ctx.fillStyle = '#ccc';
-    ctx.font = '13px monospace';
     ctx.textAlign = 'center';
-    lines.forEach(function (line, i) {
-      ctx.fillText(line, screenW / 2, 90 + i * 20);
+    var tipSpacing = Math.min(20, (screenH - tipY - 40) / tips.length);
+    tips.forEach(function (tip, i) {
+      ctx.fillStyle = '#ffcc00';
+      ctx.font = '13px sans-serif';
+      ctx.fillText(tip.icon, cx - panelW * 0.38, tipY + i * tipSpacing + 1);
+      ctx.fillStyle = '#ccc';
+      ctx.font = '12px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(tip.text, cx - panelW * 0.32, tipY + i * tipSpacing);
+      ctx.textAlign = 'center';
     });
+
+    // --- Footer ---
+    ctx.fillStyle = '#888';
+    ctx.font = '12px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Press any key to return to menu', cx, screenH - 18);
   }
 
   // Helper: draw a rounded rectangle path
@@ -1948,11 +2118,26 @@
       }
     }
 
-    // Button row 1
+    // Vehicle selection row
+    var vehRowY = slotStartY + 4 * (slotH + slotGap) + 8 * s;
+    var vehBtnW = 110 * s;
+    var vehBtnH = 34 * s;
+    var vehBtnGap = 8 * s;
+    var vehTotalW = 4 * vehBtnW + 3 * vehBtnGap;
+    var vehStartX = cx - vehTotalW / 2;
+
+    for (var vIdx = 0; vIdx < 4; vIdx++) {
+      var vx = vehStartX + vIdx * (vehBtnW + vehBtnGap);
+      if (isMouseInRect(vx, vehRowY + 4 * s, vehBtnW, vehBtnH)) {
+        return { action: 'selectVehicle', vehicleType: vIdx };
+      }
+    }
+
+    // Action buttons
     var btnW = 150 * s;
     var btnH = 38 * s;
     var btnGap = 14 * s;
-    var btnRow1Y = slotStartY + 4 * (slotH + slotGap) + 16 * s;
+    var btnRow1Y = vehRowY + vehBtnH + 22 * s;
     var btnRow2Y = btnRow1Y + btnH + 10 * s;
 
     // Ready button

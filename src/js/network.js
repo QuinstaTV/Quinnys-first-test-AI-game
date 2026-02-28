@@ -122,6 +122,14 @@
         if (callbacks.onPlayerLeft) callbacks.onPlayerLeft(data);
       });
 
+      socket.on('vehicleDamage', (data) => {
+        if (callbacks.onVehicleDamage) callbacks.onVehicleDamage(data);
+      });
+
+      socket.on('vehicleRespawn', (data) => {
+        if (callbacks.onVehicleRespawn) callbacks.onVehicleRespawn(data);
+      });
+
       socket.on('chatMessage', (data) => {
         if (callbacks.onChat) callbacks.onChat(data);
       });
@@ -223,6 +231,16 @@
     socket.emit('tileDestroyed', { tx, ty });
   }
 
+  function sendDamage(data) {
+    if (!connected || !roomId) return;
+    socket.emit('vehicleDamage', data);
+  }
+
+  function sendRespawn(data) {
+    if (!connected || !roomId) return;
+    socket.emit('vehicleRespawn', data);
+  }
+
   function sendChat(message) {
     if (!connected) return;
     socket.emit('chatMessage', { message });
@@ -238,7 +256,7 @@
     createRoom, joinRoom, leaveRoom, requestRooms,
     startGame, cancelCountdown, toggleReady, switchTeam, addAI,
     selectVehicle,
-    sendState, sendAction, sendFlagEvent, sendTileDestroyed, sendChat,
+    sendState, sendAction, sendFlagEvent, sendTileDestroyed, sendDamage, sendRespawn, sendChat,
     on,
     get connected() { return connected; },
     get roomId() { return roomId; },

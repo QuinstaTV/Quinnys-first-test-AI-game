@@ -38,6 +38,7 @@ const rooms = new Map();      // roomId -> Room
 const players = new Map();    // socketId -> Player
 
 let nextAIId = 1;
+let nextPlayerId = 1;  // For unique default player names
 
 class Room {
   constructor(id, name, hostId) {
@@ -65,7 +66,21 @@ class Room {
     });
     const team = team1Count <= team2Count ? 1 : 2;
     
-    const playerData = { team, vehicleType: 0, ready: false, name: username || 'Player', isAI: false };
+    // Ensure unique player name
+    let name = (username && username.trim() && username.trim() !== 'Player') ? username.trim() : 'Player ' + (nextPlayerId++);
+    // Check for duplicate names in this room
+    let baseName = name;
+    let suffix = 2;
+    let nameExists = true;
+    while (nameExists) {
+      nameExists = false;
+      for (const [, p] of this.players) {
+        if (p.name === name) { nameExists = true; break; }
+      }
+      if (nameExists) { name = baseName + ' (' + suffix + ')'; suffix++; }
+    }
+    
+    const playerData = { team, vehicleType: 0, ready: false, name, isAI: false };
     this.players.set(socketId, playerData);
     return playerData;
   }
@@ -78,13 +93,31 @@ class Room {
     if (this.players.size >= this.maxPlayers) return null;
 
     const aiId = 'ai_' + (nextAIId++);
-    const playerData = { team, vehicleType: Math.floor(Math.random() * 4), ready: true, name: 'AI Bot', isAI: true };
+    // Give AI bots unique names
+    let aiNum = 0;
+    for (const [, p] of this.players) { if (p.isAI) aiNum++; }
+    const aiName = 'AI Bot ' + (aiNum + 1);
+    const playerData = { team, vehicleType: Math.floor(Math.random() * 4), ready: true, name: aiName, isAI: true };
     this.players.set(aiId, playerData);
     return { id: aiId, data: playerData };
   }
 
   removePlayer(socketId) {
     this.players.delete(socketId);
+
+    // Remove all AI bots if no human players remain
+    let hasHuman = false;
+    for (const [, p] of this.players) {
+      if (!p.isAI) { hasHuman = true; break; }
+    }
+    if (!hasHuman) {
+      // Clear all AI — room will be deleted as empty by caller
+      this.players.clear();
+      this.hostId = null;
+      this.stopCountdown();
+      return;
+    }
+
     if (this.hostId === socketId) {
       // Transfer host to first non-AI player
       for (const [id, p] of this.players) {
@@ -276,6 +309,8 @@ io.on('connection', (socket) => {
     const roomPlayer = room.players.get(socket.id);
     if (roomPlayer) {
       roomPlayer.vehicleType = data.vehicleType;
+      // Broadcast so other players see the vehicle selection
+      room.broadcastLobbyUpdate(io);
     }
   });
 
@@ -330,6 +365,11 @@ io.on('connection', (socket) => {
     if (!player || !player.roomId) return;
     const room = rooms.get(player.roomId);
     if (!room) return;
+    // Only the host can add AI bots
+    if (room.hostId !== socket.id) {
+      socket.emit('error', { message: 'Only the host can add AI' });
+      return;
+    }
     const team = data && data.team ? data.team : 1;
     const result = room.addAI(team);
     if (result) {
@@ -346,7 +386,30 @@ io.on('connection', (socket) => {
     
     // Broadcast to all other players in the room
     data.playerId = socket.id;
+    // Include player name for nametag rendering
+    const room = rooms.get(player.roomId);
+    if (room) {
+      const roomPlayer = room.players.get(socket.id);
+      if (roomPlayer) data.name = roomPlayer.name;
+    }
     socket.to(player.roomId).volatile.emit('gameState', data);
+  });
+
+  // Vehicle damage relay — authoritative hit notification
+  socket.on('vehicleDamage', (data) => {
+    const player = players.get(socket.id);
+    if (!player || !player.roomId) return;
+    // Broadcast to all players including the target so they take damage
+    data.attackerId = socket.id;
+    io.to(player.roomId).emit('vehicleDamage', data);
+  });
+
+  // Vehicle respawn/type change relay
+  socket.on('vehicleRespawn', (data) => {
+    const player = players.get(socket.id);
+    if (!player || !player.roomId) return;
+    data.playerId = socket.id;
+    socket.to(player.roomId).emit('vehicleRespawn', data);
   });
 
   socket.on('action', (data) => {

@@ -16,6 +16,7 @@
 
   // Screen
   let screenW = 960, screenH = 640;
+  let currentDpr = 1;
 
   // Camera
   let camX = 0, camY = 0;
@@ -86,7 +87,7 @@
   let menuSelection = 0;
 
   // Network state
-  let remotePlayers = {};
+  let remotePlayers = {};  // networkId -> { name, vehicleType }
   let netSyncTimer = 0;
 
   // Frame timing
@@ -146,9 +147,7 @@
   }
 
   function resizeCanvas() {
-    var dpr = window.devicePixelRatio || 1;
-    // Cap DPR at 2 for performance on high-DPI devices
-    dpr = Math.min(dpr, 2);
+    currentDpr = Math.min(window.devicePixelRatio || 1, 2);
 
     // Always use actual viewport dimensions
     screenW = window.innerWidth;
@@ -172,19 +171,19 @@
     }
 
     // Set canvas backing resolution (crisp rendering)
-    canvas.width = Math.round(screenW * dpr);
-    canvas.height = Math.round(screenH * dpr);
+    canvas.width = Math.round(screenW * currentDpr);
+    canvas.height = Math.round(screenH * currentDpr);
 
     // CSS display size = viewport (never overflows)
     canvas.style.width = screenW + 'px';
     canvas.style.height = screenH + 'px';
 
     // Scale context so drawing commands use CSS pixels
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.setTransform(currentDpr, 0, 0, currentDpr, 0, 0);
     ctx.imageSmoothingEnabled = false;
 
     Game.UI.resize(screenW, screenH);
-    Game.dpr = dpr;
+    Game.dpr = currentDpr;
     Game.screenW = screenW;
     Game.screenH = screenH;
   }
@@ -280,6 +279,24 @@
         break;
       case 1:
         gameMode = 'multi';
+        // If username is the default, prompt for a name before connecting
+        var currentName = Game.UI.username || '';
+        if (!currentName || currentName === 'Player') {
+          if (Game.Input.isTouch) {
+            var entered = prompt('Enter your player name:', currentName || '');
+            if (entered && entered.trim()) {
+              Game.UI.username = entered.trim().substring(0, 16);
+              try { localStorage.setItem('dt_username', Game.UI.username); } catch(e) {}
+            }
+          } else {
+            // On desktop, show a quick prompt too for convenience
+            var entered2 = prompt('Enter your player name:', currentName || '');
+            if (entered2 && entered2.trim()) {
+              Game.UI.username = entered2.trim().substring(0, 16);
+              try { localStorage.setItem('dt_username', Game.UI.username); } catch(e) {}
+            }
+          }
+        }
         startMultiplayer();
         break;
       case 2:
@@ -316,45 +333,8 @@
         }
       }
     } else if (state === STATE.LOBBY) {
-      const action = Game.UI.getLobbyAction();
-      if (action === 'back') {
-        if (Game.Network.inRoom) {
-          Game.Network.leaveRoom();
-        } else {
-          state = STATE.MENU;
-          Game.Network.disconnect();
-        }
-        Game.Audio.play('click');
-      } else if (action === 'create') {
-        var username = Game.UI.username || 'Player';
-        Game.Network.createRoom('Game ' + Math.floor(Math.random() * 1000), username);
-      } else if (action === 'refresh') {
-        Game.Network.requestRooms();
-      } else if (action === 'ready') {
-        Game.Network.toggleReady();
-        Game.Audio.play('click');
-      } else if (action === 'start') {
-        Game.Network.startGame();
-        Game.Audio.play('click');
-      } else if (action === 'cancelCountdown') {
-        Game.Network.cancelCountdown();
-        Game.Audio.play('click');
-      } else if (action === 'switchTeam') {
-        Game.Network.switchTeam();
-        Game.Audio.play('click');
-      } else if (action === 'leave') {
-        Game.Network.leaveRoom();
-        Game.Audio.play('click');
-      } else if (action && action.action === 'join') {
-        const rooms = Game.Network.lobby.rooms;
-        var username2 = Game.UI.username || 'Player';
-        if (rooms[action.index]) {
-          Game.Network.joinRoom(rooms[action.index].id, username2);
-        }
-      } else if (action && action.action === 'addAI') {
-        Game.Network.addAI(action.team);
-        Game.Audio.play('click');
-      }
+      // Lobby clicks are handled in updateLobby() via wasClicked().
+      // Don't duplicate here to avoid double-firing actions.
     }
   }
 
@@ -438,9 +418,22 @@
       allVehicles.splice(idx, 1);
     }
 
-    const spawn = map.getSpawn(1);
-    playerVehicle = Game.createVehicle(selectedVehicle, 1, spawn.x + randFloat(-20, 20), spawn.y + randFloat(-20, 20));
+    // Use the correct team (multiplayer players may be on team 2)
+    var team = (gameMode === 'multi' && Game.Network.playerTeam) ? Game.Network.playerTeam : 1;
+    const spawn = map.getSpawn(team);
+    playerVehicle = Game.createVehicle(selectedVehicle, team, spawn.x + randFloat(-20, 20), spawn.y + randFloat(-20, 20));
     playerVehicle.isPlayer = true;
+    if (gameMode === 'multi') {
+      playerVehicle.networkId = Game.Network.playerId;
+      // Notify other players about our new vehicle
+      Game.Network.sendRespawn({
+        vehicleType: selectedVehicle,
+        team: team,
+        x: playerVehicle.x,
+        y: playerVehicle.y,
+        name: Game.UI.username || 'Player'
+      });
+    }
     allVehicles.push(playerVehicle);
 
     Game.Audio.playMusic(selectedVehicle);
@@ -908,6 +901,22 @@
   }
 
   function onVehicleHit(vehicle, projectile) {
+    // In multiplayer, send damage events for hits from the local player
+    if (gameMode === 'multi' && Game.Network.connected) {
+      // Find who shot this projectile
+      var shooter = null;
+      for (var si = 0; si < allVehicles.length; si++) {
+        if (allVehicles[si].id === projectile.owner) { shooter = allVehicles[si]; break; }
+      }
+      // Only the shooter's client sends the damage event (avoid double-counting)
+      if (shooter && shooter.isPlayer && vehicle.networkId) {
+        Game.Network.sendDamage({
+          targetId: vehicle.networkId,
+          damage: projectile.damage || 10
+        });
+      }
+    }
+
     if (!vehicle.alive) {
       // Vehicle just died - record stats
       var killer = null;
@@ -1017,6 +1026,7 @@
         f.y = f.carrier.y;
 
         if (!f.carrier.alive) {
+          var droppedByPlayer = f.carrier.isPlayer;
           f.carried = false;
           f.carrier.hasFlag = false;
           f.carrier.flagTeam = 0;
@@ -1024,15 +1034,23 @@
           Game.UI.notify((team === 1 ? 'Blue' : 'Red') + ' flag dropped!', team === 1 ? '#3388ff' : '#ff4444', 2);
           if (Game.Audio) Game.Audio.play('pickup');
 
+          // Send flag drop event in multiplayer (only from the carrier's client)
+          if (gameMode === 'multi' && droppedByPlayer && Game.Network.connected) {
+            Game.Network.sendFlagEvent({ type: 'drop', flagTeam: team, team: enemyTeam, x: f.x, y: f.y });
+          }
+
           // Return flag to base after 10s if not picked up
           (function(flag, flagTeam) {
             setTimeout(function () {
               if (!flag.carried) {
-                var basePos = map.getFlagPos(flagTeam);
+                var basePos = map ? map.getFlagPos(flagTeam) : { x: flag.x, y: flag.y };
                 flag.x = basePos.x;
                 flag.y = basePos.y;
                 flag.atBase = true;
                 Game.UI.notify((flagTeam === 1 ? 'Blue' : 'Red') + ' flag returned!', '#aaa', 2);
+                if (gameMode === 'multi' && Game.Network.connected) {
+                  Game.Network.sendFlagEvent({ type: 'return', flagTeam: flagTeam });
+                }
               }
             }, 10000);
           })(f, team);
@@ -1044,17 +1062,24 @@
             var ownFlag = flags[f.carrier.team];
             if (ownFlag.atBase) {
               // SCORE!
-              if (f.carrier.team === 1) score.team1++;
+              var scoringTeam = f.carrier.team;
+              var scoredByPlayer = f.carrier.isPlayer;
+              if (scoringTeam === 1) score.team1++;
               else score.team2++;
 
-              recordFlag(f.carrier.team, f.carrier.isPlayer);
+              recordFlag(scoringTeam, scoredByPlayer);
 
               Game.Audio.play('score');
-              if (f.carrier.isPlayer) Game.Input.hapticPattern([50, 30, 50, 30, 150]);
+              if (scoredByPlayer) Game.Input.hapticPattern([50, 30, 50, 30, 150]);
               Game.UI.notify(
-                (f.carrier.team === 1 ? 'Blue' : 'Red') + ' team SCORES!',
-                f.carrier.team === 1 ? '#3388ff' : '#ff4444', 3
+                (scoringTeam === 1 ? 'Blue' : 'Red') + ' team SCORES!',
+                scoringTeam === 1 ? '#3388ff' : '#ff4444', 3
               );
+
+              // Send capture event in multiplayer
+              if (gameMode === 'multi' && scoredByPlayer && Game.Network.connected) {
+                Game.Network.sendFlagEvent({ type: 'capture', flagTeam: team, team: scoringTeam });
+              }
 
               f.carrier.hasFlag = false;
               f.carrier.flagTeam = 0;
@@ -1080,6 +1105,11 @@
               f.atBase = true;
               Game.UI.notify((team === 1 ? 'Blue' : 'Red') + ' flag returned!', '#aaa', 2);
               if (Game.Audio) Game.Audio.play('pickup');
+
+              // Send return event in multiplayer (only if our player returned it)
+              if (gameMode === 'multi' && veh.isPlayer && Game.Network.connected) {
+                Game.Network.sendFlagEvent({ type: 'return', flagTeam: team });
+              }
             }
           } else {
             // Enemy team can pick up flag
@@ -1094,6 +1124,11 @@
                 veh.team === 1 ? '#66aaff' : '#ff7777', 3
               );
               if (Game.Audio) Game.Audio.play('pickup');
+
+              // Send pickup event in multiplayer (only if our player picked it up)
+              if (gameMode === 'multi' && veh.isPlayer && Game.Network.connected) {
+                Game.Network.sendFlagEvent({ type: 'pickup', flagTeam: team, team: veh.team });
+              }
             }
           }
         }
@@ -1168,6 +1203,25 @@
     Game.Network.on('onTileDestroyed', function (data) {
       if (map) map.destroyTile(data.tx, data.ty);
     });
+    Game.Network.on('onVehicleDamage', function (data) {
+      handleNetworkDamage(data);
+    });
+    Game.Network.on('onVehicleRespawn', function (data) {
+      handleNetworkRespawn(data);
+    });
+    Game.Network.on('onFlagEvent', function (data) {
+      handleNetworkFlagEvent(data);
+    });
+    Game.Network.on('onPlayerLeft', function (data) {
+      // Remove their vehicle from the game
+      for (var vi = allVehicles.length - 1; vi >= 0; vi--) {
+        if (allVehicles[vi].networkId === data.playerId) {
+          allVehicles.splice(vi, 1);
+          break;
+        }
+      }
+      delete remotePlayers[data.playerId];
+    });
     Game.Network.on('onDisconnect', function () {
       Game.UI.lobbyStatus = 'Disconnected from server';
       Game.UI.notify('Disconnected!', '#f00', 3);
@@ -1224,6 +1278,10 @@
       } else if (action && action.action === 'addAI') {
         Game.Network.addAI(action.team);
         Game.Audio.play('click');
+      } else if (action && action.action === 'selectVehicle') {
+        selectedVehicle = action.vehicleType;
+        Game.Network.selectVehicle(action.vehicleType);
+        Game.Audio.play('click');
       }
     }
   }
@@ -1238,15 +1296,38 @@
       map.generate();
     }
 
+    // Hook tile destruction to broadcast over network
+    var origDestroyTile = map.destroyTile.bind(map);
+    map.destroyTile = function (tx, ty) {
+      var result = origDestroyTile(tx, ty);
+      if (result && Game.Network.connected) {
+        Game.Network.sendTileDestroyed(tx, ty);
+      }
+      return result;
+    };
+
     Game.resetVehicleIds();
     Game.Projectiles.clear();
     Game.Particles.clear();
     allVehicles = [];
     aiControllers = [];
+    remotePlayers = {};
     score = { team1: 0, team2: 0 };
     gameTime = 0;
     winner = 0;
 
+    // Spawn turrets from the generated map
+    turrets = map.turrets;
+
+    // Reset flags
+    var f1Pos = map.getFlagPos(1);
+    var f2Pos = map.getFlagPos(2);
+    flags = {
+      1: { x: f1Pos.x, y: f1Pos.y, atBase: true, carried: false, carrier: null, team: 1 },
+      2: { x: f2Pos.x, y: f2Pos.y, atBase: true, carried: false, carrier: null, team: 2 }
+    };
+
+    // Create player vehicle on correct team
     var team = Game.Network.playerTeam;
     var spawn = map.getSpawn(team);
     playerVehicle = Game.createVehicle(selectedVehicle, team, spawn.x, spawn.y);
@@ -1254,7 +1335,40 @@
     playerVehicle.networkId = Game.Network.playerId;
     allVehicles.push(playerVehicle);
 
-    // NO AI spawning in multiplayer - players and server-managed AI only
+    // Store own name for rendering
+    remotePlayers[Game.Network.playerId] = {
+      name: Game.UI.username || 'Player',
+      vehicleType: selectedVehicle
+    };
+
+    // Spawn AI vehicles from lobby data
+    if (data.players) {
+      for (var pi = 0; pi < data.players.length; pi++) {
+        var p = data.players[pi];
+        if (p.isAI) {
+          var aiSpawn = map.getSpawn(p.team);
+          var aiType = (p.vehicleType != null) ? p.vehicleType : VEH.TANK;
+          var aiVeh = Game.createVehicle(aiType, p.team, aiSpawn.x + randFloat(-40, 40), aiSpawn.y + randFloat(-40, 40));
+          aiVeh.isAI = true;
+          aiVeh.networkId = p.id;
+          var aiCtrl = new Game.AIController(aiVeh, map);
+          aiCtrl.difficulty = 0.5 + Math.random() * 0.3;
+          allVehicles.push(aiVeh);
+          aiControllers.push(aiCtrl);
+          remotePlayers[p.id] = { name: p.name || 'AI Bot', vehicleType: aiType };
+        } else if (p.id !== Game.Network.playerId) {
+          // Pre-register remote human players so we know their names
+          remotePlayers[p.id] = {
+            name: p.name || 'Player',
+            vehicleType: (p.vehicleType != null) ? p.vehicleType : VEH.TANK
+          };
+        }
+      }
+    }
+
+    // Reset vehicle pool for multiplayer (all available)
+    vehiclePool = [true, true, true, true];
+    jeepLives = MAX_JEEP_LIVES;
 
     Game.Audio.playMusic(selectedVehicle);
 
@@ -1265,26 +1379,154 @@
   function handleNetworkState(data) {
     if (data.playerId === Game.Network.playerId) return;
 
+    // Track remote player names
+    if (data.name && data.playerId) {
+      if (!remotePlayers[data.playerId]) remotePlayers[data.playerId] = {};
+      remotePlayers[data.playerId].name = data.name;
+    }
+
     var remote = null;
     for (var ri = 0; ri < allVehicles.length; ri++) {
       if (allVehicles[ri].networkId === data.playerId) { remote = allVehicles[ri]; break; }
     }
+
+    // Use != null checks so type 0 (Jeep) and team 1 are not treated as falsy
+    var vehType = (data.type != null) ? data.type : VEH.TANK;
+    var vehTeam = (data.team != null) ? data.team : 2;
+
     if (!remote && data.alive !== false) {
-      remote = Game.createVehicle(
-        data.type || VEH.TANK,
-        data.team || 2,
-        data.x, data.y
-      );
+      remote = Game.createVehicle(vehType, vehTeam, data.x, data.y);
+      remote.networkId = data.playerId;
+      allVehicles.push(remote);
+    } else if (remote && remote.type !== vehType && data.alive !== false) {
+      // Vehicle type changed (player respawned with different vehicle)
+      var idx = allVehicles.indexOf(remote);
+      if (idx !== -1) allVehicles.splice(idx, 1);
+      remote = Game.createVehicle(vehType, vehTeam, data.x, data.y);
       remote.networkId = data.playerId;
       allVehicles.push(remote);
     }
+
     if (remote) {
       remote.applyNetworkState(data);
     }
   }
 
+  /* ---------- Network Damage Handler ---------- */
+  function handleNetworkDamage(data) {
+    // data: { targetId, damage, attackerId }
+    if (!data || !data.targetId) return;
+    // If WE are the target, apply damage to our player vehicle
+    if (data.targetId === Game.Network.playerId && playerVehicle && playerVehicle.alive) {
+      playerVehicle.takeDamage(data.damage || 10, -1);
+      Game.Particles.sparks(playerVehicle.x, playerVehicle.y, 4);
+      Game.Input.haptic(40);
+      if (!playerVehicle.alive) {
+        Game.UI.notify('You were destroyed!', '#ff4444', 2);
+        Game.Input.hapticPattern([100, 50, 200]);
+      }
+    }
+    // If a remote vehicle or AI is the target, apply damage to them too
+    for (var vi = 0; vi < allVehicles.length; vi++) {
+      var v = allVehicles[vi];
+      if (v.networkId === data.targetId && !v.isPlayer) {
+        v.takeDamage(data.damage || 10, -1);
+        Game.Particles.sparks(v.x, v.y, 4);
+      }
+    }
+  }
+
+  /* ---------- Network Respawn Handler ---------- */
+  function handleNetworkRespawn(data) {
+    // data: { playerId, vehicleType, team, x, y, name }
+    if (!data || data.playerId === Game.Network.playerId) return;
+    // Update name tracking
+    if (data.name) {
+      if (!remotePlayers[data.playerId]) remotePlayers[data.playerId] = {};
+      remotePlayers[data.playerId].name = data.name;
+    }
+    // Find existing vehicle for this player and replace it
+    for (var vi = allVehicles.length - 1; vi >= 0; vi--) {
+      if (allVehicles[vi].networkId === data.playerId) {
+        allVehicles.splice(vi, 1);
+        break;
+      }
+    }
+    var vehType = (data.vehicleType != null) ? data.vehicleType : VEH.TANK;
+    var vehTeam = (data.team != null) ? data.team : 2;
+    var newVeh = Game.createVehicle(vehType, vehTeam, data.x, data.y);
+    newVeh.networkId = data.playerId;
+    allVehicles.push(newVeh);
+  }
+
+  /* ---------- Network Flag Event Handler ---------- */
+  function handleNetworkFlagEvent(data) {
+    // data: { type, flagTeam, team, x, y, playerId }
+    if (!data || !flags) return;
+    var f = flags[data.flagTeam];
+    if (!f) return;
+
+    switch (data.type) {
+      case 'pickup':
+        f.atBase = false;
+        f.carried = true;
+        // Find carrier vehicle
+        for (var vi = 0; vi < allVehicles.length; vi++) {
+          if (allVehicles[vi].networkId === data.playerId) {
+            f.carrier = allVehicles[vi];
+            allVehicles[vi].hasFlag = true;
+            allVehicles[vi].flagTeam = data.flagTeam;
+            break;
+          }
+        }
+        Game.UI.notify(
+          (data.team === 1 ? 'Blue' : 'Red') + ' stole the ' + (data.flagTeam === 1 ? 'blue' : 'red') + ' flag!',
+          data.team === 1 ? '#66aaff' : '#ff7777', 3
+        );
+        break;
+      case 'capture':
+        if (data.team === 1) score.team1++;
+        else score.team2++;
+        f.carried = false;
+        if (f.carrier) { f.carrier.hasFlag = false; f.carrier.flagTeam = 0; }
+        f.carrier = null;
+        var flagHome = map.getFlagPos(data.flagTeam);
+        f.x = flagHome.x; f.y = flagHome.y; f.atBase = true;
+        Game.Audio.play('score');
+        Game.UI.notify(
+          (data.team === 1 ? 'Blue' : 'Red') + ' team SCORES!',
+          data.team === 1 ? '#3388ff' : '#ff4444', 3
+        );
+        break;
+      case 'drop':
+        f.carried = false;
+        if (f.carrier) { f.carrier.hasFlag = false; f.carrier.flagTeam = 0; }
+        f.carrier = null;
+        f.x = data.x; f.y = data.y;
+        Game.UI.notify(
+          (data.flagTeam === 1 ? 'Blue' : 'Red') + ' flag dropped!',
+          data.flagTeam === 1 ? '#3388ff' : '#ff4444', 2
+        );
+        break;
+      case 'return':
+        f.carried = false;
+        if (f.carrier) { f.carrier.hasFlag = false; f.carrier.flagTeam = 0; }
+        f.carrier = null;
+        var retBase = map.getFlagPos(data.flagTeam);
+        f.x = retBase.x; f.y = retBase.y; f.atBase = true;
+        Game.UI.notify(
+          (data.flagTeam === 1 ? 'Blue' : 'Red') + ' flag returned!', '#aaa', 2
+        );
+        break;
+    }
+  }
+
   /* ========== RENDER ========== */
   function render() {
+    // Defensive: re-apply DPR transform every frame so a stale
+    // save/restore or mid-frame resize can never shift drawing.
+    ctx.setTransform(currentDpr, 0, 0, currentDpr, 0, 0);
+
     ctx.fillStyle = '#0a0a1a';
     ctx.fillRect(0, 0, screenW, screenH);
 
@@ -1435,6 +1677,23 @@
     }
     for (var gi = 0; gi < groundVehicles.length; gi++) groundVehicles[gi].render(ctx, camX, camY);
     for (var ai = 0; ai < airVehicles.length; ai++) airVehicles[ai].render(ctx, camX, camY);
+
+    // Render player names above vehicles (multiplayer or always for identification)
+    for (var ni = 0; ni < allVehicles.length; ni++) {
+      var nv = allVehicles[ni];
+      if (!nv.alive) continue;
+      var playerName = null;
+      if (nv.isPlayer) {
+        playerName = Game.UI.username || 'Player';
+      } else if (nv.networkId && remotePlayers[nv.networkId]) {
+        playerName = remotePlayers[nv.networkId].name;
+      } else if (nv.isAI) {
+        playerName = 'AI';
+      }
+      if (playerName) {
+        Game.UI.renderUsernameLabel(ctx, nv, camX, camY, playerName);
+      }
+    }
 
     Game.Particles.render(ctx, camX, camY);
 

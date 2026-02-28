@@ -191,14 +191,19 @@ describe('Bug Fix: How-to-Play has mobile + desktop paths', () => {
     expect(uiSource).toMatch(/'AUTO'/);
   });
 
-  test('desktop how-to-play still has WASD controls text', () => {
+  test('desktop how-to-play has WASD controls and key drawings', () => {
     const fs = require('fs');
     const path = require('path');
     const uiSource = fs.readFileSync(
       path.join(__dirname, '..', 'src', 'js', 'ui.js'),
       'utf8'
     );
-    expect(uiSource).toMatch(/WASD.*Arrow Keys.*Move vehicle/);
+    expect(uiSource).toMatch(/drawKey.*'W'/);
+    expect(uiSource).toMatch(/drawKey.*'A'/);
+    expect(uiSource).toMatch(/drawKey.*'S'/);
+    expect(uiSource).toMatch(/drawKey.*'D'/);
+    expect(uiSource).toContain("'MOVE'");
+    expect(uiSource).toContain("'SHOOT'");
   });
 });
 
